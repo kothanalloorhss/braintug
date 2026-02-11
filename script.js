@@ -73,7 +73,26 @@ function initGame(p1Name, p2Name) {
     STATE.game.p2.score = 0;
     STATE.game.tug = 50;
     STATE.game.timer = 60;
-    STATE.game.difficulty = 1;
+    
+    // --- DIFFICULTY LOGIC ---
+    let startDiff = 1; // Default: Easy
+    
+    if (STATE.type === 'tournament') {
+        // Calculate how many rounds are left including this one
+        const totalRounds = STATE.bracket.length;
+        const currentRoundIdx = STATE.activeRoundIndex; // 0-based index
+        const roundsRemaining = totalRounds - currentRoundIdx;
+        
+        // Logic: 1 = Final, 2 = Semi, 3 = Quarter. 
+        // If we are in QF, SF, or Final, Start at Level 2 (Normal)
+        if (roundsRemaining <= 3) {
+            startDiff = 2; 
+        }
+    }
+    
+    STATE.game.difficulty = startDiff;
+    // ------------------------
+
     STATE.game.p1.ans = '';
     STATE.game.p2.ans = '';
 
@@ -117,7 +136,57 @@ const ENG_WORDS = [
     {full: "CHAIR", miss: "CH_IR", ans: 1, opts: ["A", "E", "I"]},
     {full: "BREAD", miss: "BR_AD", ans: 2, opts: ["O", "E", "A"]},
     {full: "EARTH", miss: "E_RTH", ans: 1, opts: ["A", "O", "U"]},
-    {full: "MONEY", miss: "MON_Y", ans: 2, opts: ["I", "E", "A"]}
+    {full: "MONEY", miss: "MON_Y", ans: 2, opts: ["I", "E", "A"]},
+    {full: "LEMON", miss: "LE_ON", ans: 2, opts: ["N", "M", "W"]},
+    {full: "RIVER", miss: "RIV_R", ans: 2, opts: ["A", "E", "I"]},
+    {full: "STONE", miss: "ST_NE", ans: 2, opts: ["A", "O", "I"]},
+    {full: "HAPPY", miss: "HA_PY", ans: 1, opts: ["P", "B", "D"]},
+    {full: "GREEN", miss: "GR_EN", ans: 3, opts: ["I", "A", "E"]},
+    {full: "SMILE", miss: "SM_LE", ans: 1, opts: ["I", "A", "Y"]},
+    {full: "BEACH", miss: "BEA_H", ans: 2, opts: ["S", "C", "T"]},
+    {full: "NIGHT", miss: "NI_HT", ans: 1, opts: ["G", "F", "H"]},
+    {full: "DREAM", miss: "DR_AM", ans: 3, opts: ["I", "A", "E"]},
+    {full: "CANDY", miss: "CAN_Y", ans: 1, opts: ["D", "B", "T"]},
+    {full: "PIZZA", miss: "PI_ZA", ans: 2, opts: ["S", "Z", "X"]},
+    {full: "TRAIN", miss: "TR_IN", ans: 2, opts: ["E", "A", "I"]},
+    {full: "SNACK", miss: "SNA_K", ans: 1, opts: ["C", "K", "S"]},
+    {full: "GHOST", miss: "GH_ST", ans: 3, opts: ["A", "I", "O"]},
+    {full: "MOUSE", miss: "MO_SE", ans: 2, opts: ["O", "U", "A"]},
+    {full: "CLOCK", miss: "CL_CK", ans: 2, opts: ["A", "O", "U"]},
+    {full: "PLANT", miss: "PL_NT", ans: 3, opts: ["E", "I", "A"]},
+    {full: "SPACE", miss: "SP_CE", ans: 3, opts: ["E", "I", "A"]},
+    {full: "WORLD", miss: "WO_LD", ans: 1, opts: ["R", "L", "D"]},
+    {full: "CAMEL", miss: "CA_EL", ans: 2, opts: ["N", "M", "W"]},
+    {full: "ZEBRA", miss: "Z_BRA", ans: 3, opts: ["I", "A", "E"]},
+    {full: "DRINK", miss: "DR_NK", ans: 3, opts: ["A", "E", "I"]},
+    {full: "TABLE", miss: "TA_LE", ans: 2, opts: ["P", "B", "D"]},
+    {full: "FLOOR", miss: "FL_OR", ans: 2, opts: ["A", "O", "U"]},
+    {full: "SHOES", miss: "SH_ES", ans: 1, opts: ["O", "A", "I"]},
+    {full: "SHIRT", miss: "SH_RT", ans: 3, opts: ["A", "E", "I"]},
+    {full: "PANTS", miss: "PA_TS", ans: 2, opts: ["M", "N", "S"]},
+    {full: "FRUIT", miss: "FR_IT", ans: 3, opts: ["O", "I", "U"]},
+    {full: "GRAPE", miss: "GR_PE", ans: 3, opts: ["E", "I", "A"]},
+    {full: "MELON", miss: "M_LON", ans: 3, opts: ["A", "I", "E"]},
+    {full: "BERRY", miss: "BE_RY", ans: 1, opts: ["R", "L", "T"]},
+    {full: "ONION", miss: "ON_ON", ans: 2, opts: ["E", "I", "A"]},
+    {full: "SALAD", miss: "SA_AD", ans: 2, opts: ["R", "L", "T"]},
+    {full: "PASTA", miss: "PA_TA", ans: 1, opts: ["S", "Z", "C"]},
+    {full: "TOAST", miss: "TO_ST", ans: 3, opts: ["O", "E", "A"]},
+    {full: "LUNCH", miss: "LU_CH", ans: 2, opts: ["M", "N", "R"]},
+    {full: "SPORT", miss: "SP_RT", ans: 2, opts: ["A", "O", "U"]},
+    {full: "RUGBY", miss: "RU_BY", ans: 1, opts: ["G", "J", "D"]},
+    {full: "START", miss: "ST_RT", ans: 3, opts: ["E", "O", "A"]},
+    {full: "FIRST", miss: "F_RST", ans: 3, opts: ["A", "E", "I"]},
+    {full: "THIRD", miss: "TH_RD", ans: 2, opts: ["E", "I", "U"]},
+    {full: "BLACK", miss: "BL_CK", ans: 3, opts: ["E", "O", "A"]},
+    {full: "WHITE", miss: "WH_TE", ans: 3, opts: ["A", "E", "I"]},
+    {full: "BROWN", miss: "BR_WN", ans: 2, opts: ["A", "O", "U"]},
+    {full: "HEAVY", miss: "HE_VY", ans: 3, opts: ["E", "I", "A"]},
+    {full: "LIGHT", miss: "LI_HT", ans: 1, opts: ["G", "F", "H"]},
+    {full: "CLEAN", miss: "CL_AN", ans: 3, opts: ["I", "A", "E"]},
+    {full: "DIRTY", miss: "DI_TY", ans: 1, opts: ["R", "L", "T"]},
+    {full: "QUICK", miss: "QU_CK", ans: 3, opts: ["A", "E", "I"]},
+    {full: "SMART", miss: "SMA_T", ans: 1, opts: ["R", "L", "N"]}
 ];
 
 function generateNewQuestion(player) {
@@ -126,14 +195,53 @@ function generateNewQuestion(player) {
     const opponent = player === 'p1' ? 'p2' : 'p1';
     
     if(STATE.mode === 'math') {
-        const type = Math.floor(Math.random() * 4); 
         let a, b, op, ans;
-        if(type === 0) { a=rand(10*diff); b=rand(10*diff); op='+'; ans=a+b; }
-        else if(type === 1) { a=rand(15*diff)+5; b=rand(a); op='-'; ans=a-b; }
-        else if(type === 2) { a=rand(3*diff)+2; b=rand(10); op='x'; ans=a*b; }
-        else { b=rand(2*diff)+2; a=b*rand(10); op='÷'; ans=a/b; }
+        // Difficulty Tuning
+        // Lvl 1 (Easy): Single digits, simple add/sub/mult. No Div.
+        // Lvl 2 (Normal): Double digits (up to 20).
+        // Lvl 3+ (Hard): Large numbers (up to 50), Division enabled.
+        
+        let type; 
+        if(diff === 1) type = Math.floor(Math.random() * 3); // 0, 1, 2 (No Div)
+        else type = Math.floor(Math.random() * 4); // 0, 1, 2, 3 (All)
+
+        if(type === 0) { 
+            // Addition
+            let range = diff === 1 ? 10 : (diff * 15);
+            a = rand(range); 
+            b = rand(range); 
+            op = '+'; 
+            ans = a + b; 
+        }
+        else if(type === 1) { 
+            // Subtraction (Ensure positive result)
+            let range = diff === 1 ? 15 : (diff * 20);
+            a = rand(range) + (diff === 1 ? 2 : 5); 
+            b = rand(a); 
+            op = '-'; 
+            ans = a - b; 
+        }
+        else if(type === 2) { 
+            // Multiplication
+            let rangeA = diff === 1 ? 5 : (diff * 4);
+            let rangeB = diff === 1 ? 5 : 10;
+            a = rand(rangeA) + 1; 
+            b = rand(rangeB) + 1; 
+            op = 'x'; 
+            ans = a * b; 
+        }
+        else { 
+            // Division (Only Lvl 2+)
+            // Make clean division: b is factor, a is multiple
+            b = rand(diff * 3) + 2; 
+            a = b * (rand(10) + 1); 
+            op = '÷'; 
+            ans = a / b; 
+        }
+        
         qObj = { type: 'math', text: `${a} ${op} ${b}`, ans: ans };
     } else {
+        // English Logic (Remains Random + No Duplicate)
         let attempts = 0;
         let w;
         do {
@@ -142,6 +250,7 @@ function generateNewQuestion(player) {
         } while (STATE.game[opponent].q && w.miss === STATE.game[opponent].q.text && attempts < 10);
         qObj = { type: 'eng', text: w.miss, ans: w.ans, opts: w.opts };
     }
+    
     STATE.game[player].q = qObj;
     renderQuestion(player, qObj);
 }
@@ -223,6 +332,9 @@ function validateAnswer(player) {
     const correctVal = STATE.game[player].q.ans;
     const fb = get(`feedback-${player}`);
 
+    // Clear any existing timer to prevent flickering
+    if (STATE.game[player].fbTimer) clearTimeout(STATE.game[player].fbTimer);
+
     if (val === correctVal) {
         // CORRECT
         STATE.game[player].score++; 
@@ -243,19 +355,34 @@ function validateAnswer(player) {
         AUDIO.playSFX('sfx-wrong');
     }
 
-    // Always reset after a check
+    // --- FIX: HIDE TEXT AFTER 1 SECOND ---
+    STATE.game[player].fbTimer = setTimeout(() => {
+        fb.innerText = "";
+        fb.className = "h-6 mt-4"; // Keep space layout
+    }, 1000);
+
+    // Update Game State
     updateTugVisuals();
     clearInput(player);
     generateNewQuestion(player);
 }
 
 function updateTugVisuals() {
-    let percent = (STATE.game.tug - 50); 
-    if(percent < -48) percent = -48;
-    if(percent > 48) percent = 48;
-    get('rope-marker').style.transform = `translateX(${percent * 1.5}vw)`;
-    if(STATE.game.tug <= 5) endGame(`${STATE.game.p1.name} Wins!`);
-    else if(STATE.game.tug >= 95) endGame(`${STATE.game.p2.name} Wins!`);
+    // LOGIC: 
+    // Tug 50 = Center (0vw)
+    // Tug 0  = Left Edge (-50vw)
+    // Tug 100 = Right Edge (+50vw)
+    
+    // We map the logic 1:1 to Viewport Width (vw)
+    let vw = (STATE.game.tug - 50); 
+    
+    // Move the Marker
+    get('rope-marker').style.transform = `translateX(${vw}vw)`;
+
+    // CHECK WINNER
+    // Ends exactly when center hits the edge (0 or 100)
+    if(STATE.game.tug <= 0) endGame(`${STATE.game.p1.name} Wins!`);
+    else if(STATE.game.tug >= 100) endGame(`${STATE.game.p2.name} Wins!`);
 }
 
 function endGame(reason) {
@@ -281,7 +408,7 @@ function endGame(reason) {
     };
 }
 
-/* --- TOURNAMENT LOGIC --- */
+/* --- TOURNAMENT LOGIC (Knockout Tree) --- */
 function addTourneyPlayer() {
     const name = get('tourney-input').value.trim();
     if(name) {
@@ -296,58 +423,198 @@ function updateTourneyUI() {
     list.innerHTML = STATE.players.map((p,i) => 
         `<li class="bg-gray-700 p-3 rounded flex justify-between"><span>${i+1}. ${p}</span></li>`
     ).join('');
+    // Require 4 or 8 players for a perfect bracket (optional but better)
     if(STATE.players.length >= 2) get('btn-start-tourney').classList.remove('hidden');
 }
 
 function generateFixture() {
+    // 1. Shuffle Players
     let p = [...STATE.players].sort(() => 0.5 - Math.random());
-    STATE.bracket = [];
-    STATE.currentMatchIndex = 0;
-    for(let i=0; i<p.length; i+=2) {
-        if(i+1 < p.length) STATE.bracket.push({ p1: p[i], p2: p[i+1], winner: null });
-        else STATE.winnersLog.push(`${p[i]} (Bye)`); 
+    
+    // 2. Pad with "BYE" if not a power of 2 (2, 4, 8, 16)
+    // This ensures the tree is balanced.
+    const nextPow2 = Math.pow(2, Math.ceil(Math.log2(p.length)));
+    while(p.length < nextPow2) {
+        p.push("BYE");
     }
+
+    STATE.bracket = []; // This will hold ALL rounds
+    let firstRound = [];
+
+    // 3. Create Round 1
+    for(let i=0; i<p.length; i+=2) {
+        firstRound.push({
+            id: `R1-M${(i/2)+1}`,
+            p1: p[i], 
+            p2: p[i+1], 
+            winner: null,
+            nextMatchId: null // Will link later
+        });
+    }
+    STATE.bracket.push(firstRound);
+
+    // 4. Generate Future Rounds (Empty slots)
+    let activeRound = firstRound;
+    let roundNum = 2;
+    
+    while(activeRound.length > 1) {
+        let nextRound = [];
+        for(let i=0; i<activeRound.length; i+=2) {
+            let matchId = `R${roundNum}-M${(i/2)+1}`;
+            
+            // Link previous matches to this one
+            activeRound[i].nextMatchId = matchId;
+            activeRound[i].nextSlot = 'p1';
+            
+            if(activeRound[i+1]) {
+                activeRound[i+1].nextMatchId = matchId;
+                activeRound[i+1].nextSlot = 'p2';
+            }
+
+            nextRound.push({
+                id: matchId,
+                p1: "TBD", // To Be Decided
+                p2: "TBD", 
+                winner: null,
+                nextMatchId: null
+            });
+        }
+        STATE.bracket.push(nextRound);
+        activeRound = nextRound;
+        roundNum++;
+    }
+
+    // 5. Auto-Advance "BYES"
+    advanceByes();
+    
+    STATE.currentMatchIndex = 0; // We will find the first playable match
+    updateCurrentMatchIndex();
     renderBracket();
     show('screen-tourney-hub');
 }
 
+function advanceByes() {
+    // Check Round 1 for BYEs and auto-win the opponent
+    STATE.bracket[0].forEach(m => {
+        if(m.p2 === "BYE") {
+            m.winner = m.p1;
+            propagateWinner(m);
+        } else if (m.p1 === "BYE") {
+            m.winner = m.p2;
+            propagateWinner(m);
+        }
+    });
+}
+
+function propagateWinner(match) {
+    if(!match.nextMatchId) return; // Final match has no next
+
+    // Find the next match object
+    for(let r of STATE.bracket) {
+        let nextM = r.find(m => m.id === match.nextMatchId);
+        if(nextM) {
+            if(match.nextSlot === 'p1') nextM.p1 = match.winner;
+            else nextM.p2 = match.winner;
+            
+            // If the next match now has a "BYE" (rare edge case), auto advance it too
+            if(nextM.p2 === "BYE" && nextM.p1 !== "TBD") {
+                nextM.winner = nextM.p1;
+                propagateWinner(nextM);
+            }
+        }
+    }
+}
+
+function updateCurrentMatchIndex() {
+    // Find the first match that is ready (has 2 players) but no winner
+    for(let rIndex = 0; rIndex < STATE.bracket.length; rIndex++) {
+        for(let mIndex = 0; mIndex < STATE.bracket[rIndex].length; mIndex++) {
+            let m = STATE.bracket[rIndex][mIndex];
+            if(!m.winner && m.p1 !== "TBD" && m.p2 !== "TBD" && m.p1 !== "BYE" && m.p2 !== "BYE") {
+                STATE.activeRoundIndex = rIndex;
+                STATE.activeMatchIndex = mIndex;
+                return;
+            }
+        }
+    }
+    STATE.activeRoundIndex = -1; // Tournament Over
+}
+
 function renderBracket() {
     const view = get('bracket-view');
-    view.innerHTML = STATE.bracket.map((m, i) => {
-        const active = (i === STATE.currentMatchIndex && !m.winner);
-        return `
-        <div class="p-4 border-l-4 ${active ? 'border-yellow-500 bg-gray-700' : 'border-gray-600'} mb-2 rounded bg-gray-800/50">
-            <div class="flex justify-between font-bold">
-                <span class="${m.winner===m.p1 ? 'text-green-400' : ''}">${m.p1}</span>
-                <span class="text-gray-500">VS</span>
-                <span class="${m.winner===m.p2 ? 'text-green-400' : ''}">${m.p2}</span>
-            </div>
-            <div class="text-xs text-gray-400 mt-1 uppercase tracking-wider">${m.winner ? 'Finished' : (active ? 'UP NEXT' : 'Pending')}</div>
-        </div>`;
-    }).join('');
+    view.innerHTML = '';
 
-    if(STATE.currentMatchIndex < STATE.bracket.length) {
-        const m = STATE.bracket[STATE.currentMatchIndex];
+    STATE.bracket.forEach((round, rIdx) => {
+        // Label: Quarter Finals, Semi Finals, Final
+        let roundName = "Round " + (rIdx + 1);
+        let matchesLeft = round.length;
+        if(matchesLeft === 1) roundName = "🏆 GRAND FINAL";
+        else if(matchesLeft === 2) roundName = "SEMI FINALS";
+        else if(matchesLeft === 4) roundName = "QUARTER FINALS";
+
+        let html = `<h3 class="text-gray-500 font-bold uppercase text-sm mb-2 mt-4 sticky top-0 bg-gray-800 py-2">${roundName}</h3>`;
+        
+        round.forEach((m, mIdx) => {
+            const isActive = (rIdx === STATE.activeRoundIndex && mIdx === STATE.activeMatchIndex);
+            
+            // Visual Styling
+            let borderClass = 'border-gray-600';
+            if(m.winner) borderClass = 'border-green-600 opacity-60'; // Done
+            else if(isActive) borderClass = 'border-yellow-500 bg-gray-700 shadow-lg scale-105'; // Current
+
+            html += `
+            <div class="p-3 border-l-4 ${borderClass} mb-2 rounded bg-gray-800/50 transition-all">
+                <div class="flex justify-between text-lg">
+                    <span class="${m.winner===m.p1 ? 'text-green-400 font-bold' : (m.p1==='TBD'?'text-gray-600':'text-white')}">${m.p1}</span>
+                    <span class="text-gray-600 text-sm px-2 mt-1">VS</span>
+                    <span class="${m.winner===m.p2 ? 'text-green-400 font-bold' : (m.p2==='TBD'?'text-gray-600':'text-white')}">${m.p2}</span>
+                </div>
+            </div>`;
+        });
+        view.innerHTML += html;
+    });
+
+    // Sidebar Update
+    if(STATE.activeRoundIndex !== -1) {
+        const m = STATE.bracket[STATE.activeRoundIndex][STATE.activeMatchIndex];
         get('next-match-card').innerHTML = `
+            <div class="text-xs text-yellow-500 font-bold uppercase mb-2">UP NEXT</div>
             <div class="text-3xl font-bold mb-4">
-                <span class="text-p1">${m.p1}</span><br><span class="text-sm text-gray-500">VS</span><br><span class="text-p2">${m.p2}</span>
+                <span class="text-p1">${m.p1}</span><br>
+                <span class="text-sm text-gray-500">VS</span><br>
+                <span class="text-p2">${m.p2}</span>
             </div>
-            <button onclick="initGame('${m.p1}', '${m.p2}')" class="w-full py-3 bg-accent text-black font-bold rounded shadow-lg animate-pulse">START</button>
+            <button onclick="initGame('${m.p1}', '${m.p2}')" class="w-full py-3 bg-accent text-black font-bold rounded shadow-lg animate-pulse hover:scale-105 transition">START MATCH</button>
         `;
     } else {
-        get('next-match-card').innerHTML = `<div class="text-green-400 font-bold text-xl">Tournament Finished!</div>`;
+        // Find Champion
+        let lastRound = STATE.bracket[STATE.bracket.length-1];
+        let champ = lastRound[0].winner;
+        get('next-match-card').innerHTML = `
+            <div class="text-green-400 font-bold text-xl mb-2">TOURNAMENT COMPLETE</div>
+            <div class="text-6xl">👑</div>
+            <div class="text-white font-bold text-2xl mt-2">${champ}</div>
+        `;
     }
 }
 
 function advanceTournament(winner) {
-    if(STATE.bracket[STATE.currentMatchIndex]) {
-        STATE.bracket[STATE.currentMatchIndex].winner = winner;
-        STATE.winnersLog.push(`${winner} won Match ${STATE.currentMatchIndex+1}`);
-        get('winners-log').innerHTML = STATE.winnersLog.map(l => `<li>> ${l}</li>`).join('');
-        STATE.currentMatchIndex++;
-        renderBracket();
-        show('screen-tourney-hub');
-    }
+    // 1. Record Winner
+    let m = STATE.bracket[STATE.activeRoundIndex][STATE.activeMatchIndex];
+    m.winner = winner;
+    
+    // 2. Move Winner to Next Round
+    propagateWinner(m);
+    
+    // 3. Find Next Match
+    updateCurrentMatchIndex();
+    
+    // 4. Log
+    STATE.winnersLog.unshift(`Round ${STATE.activeRoundIndex+1}: ${winner} def. ${winner===m.p1?m.p2:m.p1}`);
+    get('winners-log').innerHTML = STATE.winnersLog.map(l => `<li>> ${l}</li>`).join('');
+
+    renderBracket();
+    show('screen-tourney-hub');
 }
 
 function quitTournament() { if(confirm('Exit Tournament?')) show('screen-menu'); }
