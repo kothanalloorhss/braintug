@@ -20,13 +20,22 @@ const STATE = {
 /* --- DOM HELPERS --- */
 const get = (id) => document.getElementById(id);
 const hideAll = () => document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
-const show = (id) => { 
+
+// FIX: Create the main function 'showScreen'
+const showScreen = (id) => { 
     hideAll(); 
-    get(id).classList.remove('hidden'); 
-    if(id.includes('game') || id.includes('menu') || id.includes('setup') || id.includes('hub')) {
-        get(id).classList.add('flex');
+    const element = get(id);
+    if(element) {
+        element.classList.remove('hidden'); 
+        // Restore flex layout for screens that need it
+        if(id.includes('game') || id.includes('menu') || id.includes('setup') || id.includes('hub')) {
+            element.classList.add('flex');
+        }
     }
 };
+
+// FIX: Map 'show' to 'showScreen' so internal code works too
+const show = showScreen;
 
 /* --- ROBUST AUDIO SYSTEM --- */
 const AUDIO = {
