@@ -28,7 +28,7 @@ const show = (id) => {
     }
 };
 
-/* --- ROBUST AUDIO SYSTEM (Prevents Crashes) --- */
+/* --- ROBUST AUDIO SYSTEM --- */
 const AUDIO = {
     bgm: get('bgm'),
     playBGM: () => { 
@@ -88,11 +88,8 @@ function initGame(p1Name, p2Name) {
     get('feedback-p2').innerText = "";
     
     AUDIO.playBGM();
-    
-    // Generate distinct questions
     generateNewQuestion('p1');
     generateNewQuestion('p2');
-    
     updateTugVisuals();
     show('screen-game');
 
@@ -103,15 +100,11 @@ function initGame(p1Name, p2Name) {
 function gameLoop() {
     STATE.game.timer--;
     get('game-timer').innerText = STATE.game.timer;
-    
-    // Increase difficulty every 15s
     if(STATE.game.timer % 15 === 0 && STATE.game.difficulty < 5) STATE.game.difficulty++;
-    
     if(STATE.game.timer <= 0) endGame("Time's Up!");
 }
 
 /* --- QUESTION GENERATOR --- */
-// Expanded Vocabulary
 const ENG_WORDS = [
     {full: "APPLE", miss: "A_PLE", ans: 2, opts: ["R", "P", "S"]},
     {full: "TIGER", miss: "TI_ER", ans: 3, opts: ["A", "I", "G"]},
@@ -135,27 +128,20 @@ function generateNewQuestion(player) {
     if(STATE.mode === 'math') {
         const type = Math.floor(Math.random() * 4); 
         let a, b, op, ans;
-        
-        // Math Logic
         if(type === 0) { a=rand(10*diff); b=rand(10*diff); op='+'; ans=a+b; }
         else if(type === 1) { a=rand(15*diff)+5; b=rand(a); op='-'; ans=a-b; }
         else if(type === 2) { a=rand(3*diff)+2; b=rand(10); op='x'; ans=a*b; }
         else { b=rand(2*diff)+2; a=b*rand(10); op='÷'; ans=a/b; }
-        
         qObj = { type: 'math', text: `${a} ${op} ${b}`, ans: ans };
     } else {
-        // English Logic with Anti-Duplicate Check
         let attempts = 0;
         let w;
         do {
             w = ENG_WORDS[Math.floor(Math.random() * ENG_WORDS.length)];
             attempts++;
-            // Check if opponent has the exact same question text
         } while (STATE.game[opponent].q && w.miss === STATE.game[opponent].q.text && attempts < 10);
-        
         qObj = { type: 'eng', text: w.miss, ans: w.ans, opts: w.opts };
     }
-    
     STATE.game[player].q = qObj;
     renderQuestion(player, qObj);
 }
@@ -165,7 +151,6 @@ function rand(n) { return Math.floor(Math.random() * n) + 1; }
 function renderQuestion(player, q) {
     get(`q-${player}-text`).innerText = q.text;
     const optsDiv = get(`q-${player}-opts`);
-    
     if(q.type === 'eng') {
         optsDiv.classList.remove('hidden');
         optsDiv.innerHTML = q.opts.map((o, i) => 
@@ -176,43 +161,53 @@ function renderQuestion(player, q) {
     }
 }
 
-/* --- INPUT HANDLING --- */
+/* --- INSTANT INPUT HANDLING (No Submit Key) --- */
 document.addEventListener('keydown', (e) => {
     if(!STATE.game.active || get('screen-game').classList.contains('hidden')) return;
 
     const key = e.key;
     const code = e.code;
     
-    // --- PLAYER 1 (Left): Top Row 0-9, A, S ---
+    // PLAYER 1 (Left): Top Row 0-9
+    // Note: We removed 'A' and 'Enter' checks
     if(code.startsWith('Digit') && "0123456789".includes(key)) {
-        handleInput('p1', key);
+        handleInstantInput('p1', key);
     }
-    else if(code === 'KeyA') submitAnswer('p1');
-    else if(code === 'KeyS') clearInput('p1');
+    // Allow 'S' to clear P1 manually if they made a mistake before auto-submit
+    if(code === 'KeyS') clearInput('p1');
 
-    // --- PLAYER 2 (Right): Numpad 0-9, Enter, Backspace ---
+    // PLAYER 2 (Right): Numpad 0-9
     if(code.startsWith('Numpad') && "0123456789".includes(key)) {
-        handleInput('p2', key);
+        handleInstantInput('p2', key);
     }
-    else if(code === 'Enter') submitAnswer('p2');
-    else if(code === 'Backspace') clearInput('p2');
+    // Allow 'Backspace' to clear P2 manually
+    if(code === 'Backspace') clearInput('p2');
 });
 
-function handleInput(player, char) {
-    // Determine max length: English Mode = 1 char max, Math Mode = 4 chars max
-    const maxLength = STATE.mode === 'english' ? 1 : 4;
+function handleInstantInput(player, char) {
+    const currentQ = STATE.game[player].q;
+    if(!currentQ) return;
 
-    if(STATE.game[player].ans.length < maxLength) {
-        STATE.game[player].ans += char;
-        const el = get(`input-${player}`);
-        el.innerText = STATE.game[player].ans;
-        
-        // Visual Flash
-        el.classList.remove('text-p1', 'text-p2');
-        el.classList.add('text-white');
+    // 1. Calculate Target Length
+    // English mode: Answer is always 1 digit (1, 2, or 3)
+    // Math mode: Answer could be '12' (len 2) or '5' (len 1)
+    const targetLength = currentQ.ans.toString().length;
+
+    // 2. Add Character
+    STATE.game[player].ans += char;
+    
+    // 3. Update UI
+    const el = get(`input-${player}`);
+    el.innerText = STATE.game[player].ans;
+    el.classList.add('text-white'); // Flash effect
+    setTimeout(() => el.classList.remove('text-white'), 100);
+
+    // 4. INSTANT CHECK LOGIC
+    // If user has typed enough digits, check immediately
+    if(STATE.game[player].ans.length >= targetLength) {
+        // Add a tiny delay (100ms) so user sees the number they typed before it disappears
         setTimeout(() => {
-            el.classList.remove('text-white');
-            el.classList.add(player === 'p1' ? 'text-p1' : 'text-p2');
+            validateAnswer(player);
         }, 100);
     }
 }
@@ -222,18 +217,14 @@ function clearInput(player) {
     get(`input-${player}`).innerText = '';
 }
 
-function submitAnswer(player) {
+function validateAnswer(player) {
     const inputStr = STATE.game[player].ans;
-    if(inputStr === '') return; // Empty input
-
     const val = parseInt(inputStr);
     const correctVal = STATE.game[player].q.ans;
-    const isCorrect = (val === correctVal);
-    
     const fb = get(`feedback-${player}`);
 
-    // LOGIC FIRST (Before Audio)
-    if(isCorrect) {
+    if (val === correctVal) {
+        // CORRECT
         STATE.game[player].score++; 
         if(player === 'p1') STATE.game.tug -= 7; 
         else STATE.game.tug += 7;
@@ -241,31 +232,28 @@ function submitAnswer(player) {
         fb.innerText = "CORRECT!";
         fb.className = "h-6 mt-4 font-bold text-xl text-accent animate-bounce";
         get(`score-${player}`).innerText = STATE.game[player].score;
+        AUDIO.playSFX('sfx-correct');
     } else {
+        // WRONG
         if(player === 'p1') STATE.game.tug += 3; 
         else STATE.game.tug -= 3;
 
         fb.innerText = "WRONG";
         fb.className = "h-6 mt-4 font-bold text-xl text-danger animate-pulse";
+        AUDIO.playSFX('sfx-wrong');
     }
 
-    // UPDATE UI IMMEDIATELY
+    // Always reset after a check
     updateTugVisuals();
     clearInput(player);
     generateNewQuestion(player);
-
-    // AUDIO LAST (So errors don't stop game)
-    if(isCorrect) AUDIO.playSFX('sfx-correct');
-    else AUDIO.playSFX('sfx-wrong');
 }
 
 function updateTugVisuals() {
     let percent = (STATE.game.tug - 50); 
     if(percent < -48) percent = -48;
     if(percent > 48) percent = 48;
-    
     get('rope-marker').style.transform = `translateX(${percent * 1.5}vw)`;
-
     if(STATE.game.tug <= 5) endGame(`${STATE.game.p1.name} Wins!`);
     else if(STATE.game.tug >= 95) endGame(`${STATE.game.p2.name} Wins!`);
 }
@@ -308,7 +296,6 @@ function updateTourneyUI() {
     list.innerHTML = STATE.players.map((p,i) => 
         `<li class="bg-gray-700 p-3 rounded flex justify-between"><span>${i+1}. ${p}</span></li>`
     ).join('');
-    
     if(STATE.players.length >= 2) get('btn-start-tourney').classList.remove('hidden');
 }
 
@@ -316,7 +303,6 @@ function generateFixture() {
     let p = [...STATE.players].sort(() => 0.5 - Math.random());
     STATE.bracket = [];
     STATE.currentMatchIndex = 0;
-    
     for(let i=0; i<p.length; i+=2) {
         if(i+1 < p.length) STATE.bracket.push({ p1: p[i], p2: p[i+1], winner: null });
         else STATE.winnersLog.push(`${p[i]} (Bye)`); 
