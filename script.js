@@ -137,7 +137,6 @@ function runCountdown() {
         } else if (count === 0) {
             text.innerText = "FIGHT!";
             text.className = "text-9xl font-black text-red-500 animate-ping-slow";
-            AUDIO.playSFX('sfx-win'); // "Fight" sound or Win sound to signal start
         } else {
             clearInterval(int);
             overlay.classList.add('hidden');
