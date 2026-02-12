@@ -215,7 +215,7 @@ function renderQuestion(p, q) {
     } else opts.classList.add('hidden');
 }
 
-/* --- INPUT HANDLING (PC & MOBILE) --- */
+/* --- INPUT HANDLING --- */
 // PC Keys
 document.addEventListener('keydown', (e) => {
     if(!STATE.game.active || get('screen-game').classList.contains('hidden')) return;
@@ -230,7 +230,7 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// Exposed for Mobile Buttons
+// Mobile Buttons
 window.handleInstantInput = (player, char) => {
     if(STATE.game[player].frozen) return;
     const currentQ = STATE.game[player].q;
@@ -318,18 +318,17 @@ function triggerFreeze(player) {
 }
 
 function updateTugVisuals() {
-    // Check if we are on Mobile (Vertical Tug) or Desktop (Horizontal Tug)
-    const isMobile = window.innerWidth < 768;
+    // FIX: Check for 'lg' breakpoint (1024px) for Tablets
+    const isMobile = window.innerWidth < 1024;
     
-    let val = (STATE.game.tug - 50); // -50 to 50
+    let val = (STATE.game.tug - 50); 
     if(val < -45) val = -45; if(val > 45) val = 45;
 
     if(isMobile) {
-        // Vertical Logic: 0 (P1 Win) is TOP (-45vh), 100 (P2 Win) is BOTTOM (+45vh)
-        // Note: P1 is Top in DOM, so Negative TranslateY moves UP towards P1
+        // Vertical Logic for Tablet/Mobile
         get('rope-marker').style.transform = `translateY(${val}vh)`;
     } else {
-        // Horizontal Logic: 0 (P1 Win) is LEFT (-45vw), 100 (P2 Win) is RIGHT (+45vw)
+        // Horizontal Logic for Desktop
         get('rope-marker').style.transform = `translateX(${val}vw)`;
     }
 
