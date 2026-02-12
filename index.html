@@ -7,6 +7,7 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -47,6 +48,10 @@
     <audio id="sfx-correct"><source src="assets/correct.mp3" type="audio/mpeg"></audio>
     <audio id="sfx-wrong"><source src="assets/wrong.mp3" type="audio/mpeg"></audio>
     <audio id="sfx-win"><source src="assets/win.mp3" type="audio/mpeg"></audio>
+
+    <button onclick="toggleMute()" id="btn-mute" class="fixed top-4 right-4 z-[100] bg-gray-800 p-3 rounded-full border border-gray-600 hover:bg-gray-700 transition">
+    <i class="fas fa-volume-up text-white" id="icon-mute"></i>
+</button>
 
     <div id="screen-menu" class="screen flex flex-col items-center justify-center h-full w-full p-4 space-y-8 absolute inset-0 bg-gray-900 z-50">
         <h1 class="text-5xl md:text-8xl font-black uppercase tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-p1 to-p2 drop-shadow-lg text-center">

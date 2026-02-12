@@ -35,12 +35,40 @@ window.showScreen = (id) => {
 };
 const show = window.showScreen;
 
-/* --- AUDIO SYSTEM --- */
+/* --- AUDIO SYSTEM (WITH MUTE) --- */
 const AUDIO = {
     bgm: get('bgm'),
-    playBGM: () => { try { if(AUDIO.bgm) { AUDIO.bgm.volume = 0.2; AUDIO.bgm.play().catch(()=>{}); } } catch(e){} },
+    muted: false,
+    playBGM: () => { 
+        try { 
+            if(AUDIO.bgm && !AUDIO.muted) { 
+                AUDIO.bgm.volume = 0.2; 
+                AUDIO.bgm.play().catch(()=>{}); 
+            } 
+        } catch(e){} 
+    },
     stopBGM: () => { try { if(AUDIO.bgm) { AUDIO.bgm.pause(); AUDIO.bgm.currentTime = 0; } } catch(e){} },
-    playSFX: (id) => { try { const s = get(id); if(s) { s.currentTime=0; s.play().catch(()=>{}); } } catch(e){} }
+    playSFX: (id) => { 
+        try { 
+            const s = get(id); 
+            if(s && !AUDIO.muted) { 
+                s.currentTime=0; 
+                s.play().catch(()=>{}); 
+            } 
+        } catch(e){} 
+    }
+};
+
+window.toggleMute = () => {
+    AUDIO.muted = !AUDIO.muted;
+    const icon = get('icon-mute');
+    if(AUDIO.muted) {
+        icon.className = "fas fa-volume-mute text-red-500";
+        AUDIO.stopBGM();
+    } else {
+        icon.className = "fas fa-volume-up text-white";
+        if(STATE.game.active) AUDIO.playBGM();
+    }
 };
 
 /* --- NAVIGATION --- */
@@ -112,9 +140,24 @@ function resetUI() {
     get('combo-p2').classList.add('hidden');
 }
 
+/* --- GAME LOOP (WITH SUDDEN DEATH) --- */
 function gameLoop() {
     STATE.game.timer--;
-    get('game-timer').innerText = STATE.game.timer;
+    const timerEl = get('game-timer');
+    timerEl.innerText = STATE.game.timer;
+
+    // Sudden Death Visuals (Last 10 seconds)
+    if(STATE.game.timer <= 10) {
+        timerEl.parentElement.classList.remove('bg-black/80', 'border-gray-600');
+        timerEl.parentElement.classList.add('bg-red-600', 'border-red-400', 'animate-pulse');
+        timerEl.classList.add('text-black');
+    } else {
+        // Reset styles (in case of restart)
+        timerEl.parentElement.classList.add('bg-black/80', 'border-gray-600');
+        timerEl.parentElement.classList.remove('bg-red-600', 'border-red-400', 'animate-pulse');
+        timerEl.classList.remove('text-black');
+    }
+
     if(STATE.game.timer % 15 === 0 && STATE.game.difficulty < 5) STATE.game.difficulty++;
     if(STATE.game.timer <= 0) endGame("Time's Up!");
 }
@@ -348,6 +391,15 @@ function endGame(reason) {
 
     get('modal-title').innerText = winner === "DRAW" ? "It's a Draw!" : `${winner} Wins!`;
     get('modal-msg').innerText = reason;
+    // Fire Confetti if not a draw
+    if(winner !== "DRAW") {
+        confetti({
+            particleCount: 150,
+            spread: 70,
+            origin: { y: 0.6 },
+            colors: ['#22c55e', '#f97316', '#3b82f6'] // Green, Orange, Blue
+        });
+    }
     get('modal').classList.remove('hidden');
     get('modal').classList.add('flex');
     
