@@ -35,18 +35,15 @@
         }
     </script>
     <style>
-        /* Physics & Mobile Styles */
+        /* Physics */
         #rope-marker { transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         .frozen-overlay { background: rgba(0, 180, 255, 0.2); backdrop-filter: blur(2px); }
         
-        /* Disable Text Selection on Mobile for faster tapping */
+        /* Disable Text Selection */
         body { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
         
         /* Hide Scrollbars */
         ::-webkit-scrollbar { display: none; }
-
-        /* Mobile Tabletop Rotation */
-        .mobile-rotate-180 { transform: rotate(180deg); }
     </style>
 </head>
 <body class="bg-gray-900 text-white h-screen overflow-hidden flex flex-col font-sans touch-manipulation">
@@ -137,7 +134,8 @@
 
         <div class="flex-1 flex flex-col md:flex-row relative h-full">
             
-            <div id="zone-p1" class="flex-1 border-b md:border-b-0 md:border-r border-gray-700 flex flex-col items-center justify-between p-4 relative transition-colors duration-200 mobile-rotate-180">
+            <div id="zone-p1" class="flex-1 border-b md:border-b-0 md:border-r border-gray-700 flex flex-col items-center justify-between p-4 relative transition-colors duration-200 transform rotate-180 md:rotate-0">
+                
                 <div class="w-full flex justify-between items-center opacity-80">
                     <div class="text-left">
                         <h3 id="game-p1-name" class="text-lg font-bold text-p1">P1</h3>
@@ -169,7 +167,6 @@
                     <button onclick="handleInstantInput('p1', '9')" class="bg-gray-800 p-3 rounded text-xl font-bold active:bg-p1">9</button>
                     <button onclick="clearInput('p1')" class="bg-gray-700 p-3 rounded text-lg font-bold text-red-400">DEL</button>
                     <button onclick="handleInstantInput('p1', '0')" class="bg-gray-800 p-3 rounded text-xl font-bold active:bg-p1">0</button>
-                    <button class="bg-gray-900 p-3 rounded"></button>
                 </div>
             </div>
 
@@ -211,7 +208,6 @@
                     <button onclick="handleInstantInput('p2', '9')" class="bg-gray-800 p-3 rounded text-xl font-bold active:bg-p2">9</button>
                     <button onclick="clearInput('p2')" class="bg-gray-700 p-3 rounded text-lg font-bold text-red-400">DEL</button>
                     <button onclick="handleInstantInput('p2', '0')" class="bg-gray-800 p-3 rounded text-xl font-bold active:bg-p2">0</button>
-                    <button class="bg-gray-900 p-3 rounded"></button>
                 </div>
             </div>
         </div>
