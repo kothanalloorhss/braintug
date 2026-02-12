@@ -33,7 +33,7 @@ function showScreen(id) {
     const el = get(id);
     if(el) {
         el.classList.remove('hidden');
-        if(id.includes('game') || id.includes('menu') || id.includes('hub')) el.classList.add('flex');
+        if(id.includes('game') || id.includes('menu') || id.includes('setup') || id.includes('hub')) el.classList.add('flex');
     }
 }
 
@@ -72,7 +72,7 @@ window.setupQuickPlay = () => { STATE.type='quick'; showScreen('modal-quick-setu
 window.startQuickGameFromModal = () => {
     const p1 = get('qp-p1').value.trim() || 'Player 1';
     const p2 = get('qp-p2').value.trim() || 'Player 2';
-    showScreen('modal-quick-setup'); // Hide modal logic handled by screen switch
+    showScreen('modal-quick-setup'); 
     prepareGame(p1, p2);
 };
 
@@ -126,15 +126,18 @@ function runCountdown() {
     let count = 3;
     text.innerText = count;
     
+    // --- FIX: Play Music ONCE at the start ---
+    AUDIO.playSFX('sfx-countdown'); 
+    
     const int = setInterval(() => {
         count--;
         if(count > 0) {
             text.innerText = count;
-            AUDIO.playSFX('sfx-countdown'); // PLAY YOUR COUNTDOWN SOUND
+            // DO NOT play sound here, or it will stutter
         } else if (count === 0) {
             text.innerText = "FIGHT!";
             text.className = "text-9xl font-black text-red-500 animate-ping-slow";
-            AUDIO.playSFX('sfx-win'); // Start sound
+            AUDIO.playSFX('sfx-win'); // "Fight" sound or Win sound to signal start
         } else {
             clearInterval(int);
             overlay.classList.add('hidden');
@@ -188,23 +191,21 @@ function generateQuestion(p) {
 
     if(STATE.mode === 'math') {
         let a,b,op,ans,type;
-        // 1=Add, 2=Sub, 3=Mult, 4=Div, 5=Mix
         const typeRoll = Math.random();
         
-        if(diff === 1) { // Easy: Add/Sub small
+        if(diff === 1) { 
             if(typeRoll > 0.5) { a=rand(10); b=rand(10); op='+'; ans=a+b; }
             else { a=rand(15)+3; b=rand(a); op='-'; ans=a-b; }
-        } else if(diff === 2) { // Normal: Mult small
+        } else if(diff === 2) { 
             if(typeRoll > 0.6) { a=rand(9)+1; b=rand(9)+1; op='x'; ans=a*b; }
             else { a=rand(20); b=rand(20); op='+'; ans=a+b; }
-        } else { // Hard: Div + Big Mult
+        } else { 
              if(typeRoll < 0.25) { b=rand(8)+2; a=b*(rand(9)+1); op='÷'; ans=a/b; }
              else if(typeRoll < 0.5) { a=rand(12)+2; b=rand(12)+2; op='x'; ans=a*b; }
              else { a=rand(50); b=rand(50); op='+'; ans=a+b; }
         }
         q = { t:'math', txt:`${a} ${op} ${b}`, ans:ans };
     } else {
-        // English
         const w = ENG_DICT[Math.floor(Math.random()*ENG_DICT.length)];
         q = { t:'eng', txt:w.m, ans:w.a, opts:w.o };
     }
@@ -231,24 +232,20 @@ function renderQuestion(p, q) {
 }
 
 /* --- INPUT & SCORING --- */
-// Physical Keyboard
 document.addEventListener('keydown', (e) => {
     if(!STATE.game.active) return;
     const k=e.key, c=e.code;
     
-    // P1: Top Row (Digits)
     if(!STATE.game.p1.frozen) {
         if(c.startsWith('Digit') && "0123456789".includes(k)) handleInput('p1', k);
         if(c==='KeyS') clearInput('p1');
     }
-    // P2: Numpad
     if(!STATE.game.p2.frozen) {
         if(c.startsWith('Numpad') && "0123456789".includes(k)) handleInput('p2', k);
         if(c==='Backspace') clearInput('p2');
     }
 });
 
-// Mobile Taps
 window.tapInput = (p, k) => handleInput(p, k);
 window.tapClear = (p) => clearInput(p);
 
@@ -257,14 +254,11 @@ function handleInput(p, char) {
     const q = STATE.game[p].q;
     if(!q) return;
 
-    // Visual Feedback
     STATE.game[p].ans += char;
     get(`${p}-input`).innerText = STATE.game[p].ans;
     
-    // Check Length
     const reqLen = q.ans.toString().length;
     if(STATE.game[p].ans.length >= reqLen) {
-        // Tiny delay for visual feel
         setTimeout(() => validate(p), 50);
     }
 }
@@ -277,7 +271,6 @@ function validate(p) {
     const fb = get(`${p}-feedback`);
     
     if(val === correct) {
-        // CORRECT
         STATE.game[p].score++;
         STATE.game[p].streak++;
         get(`${p}-score`).innerText = STATE.game[p].score;
@@ -286,22 +279,18 @@ function validate(p) {
         fb.innerText = "GOOD!";
         fb.className = "h-8 mt-2 font-bold text-xl tracking-wider text-accent animate-pop";
         
-        // Calculation
         let power = 8;
-        // Streak Bonus
         if(STATE.game[p].streak >= 3) {
             power = 15;
             get(`${p}-combo`).classList.remove('hidden');
-            get(`zone-${p}`).classList.add('border-yellow-400'); // Glow
+            get(`zone-${p}`).classList.add('border-yellow-400'); 
         }
-        // Rubber Banding (Help losing player)
         if(p==='p1' && STATE.game.tugValue > 80) power += 5;
         if(p==='p2' && STATE.game.tugValue < 20) power += 5;
 
         moveTug(p, power);
 
     } else {
-        // WRONG
         STATE.game[p].streak = 0;
         get(`${p}-combo`).classList.add('hidden');
         get(`zone-${p}`).classList.remove('border-yellow-400');
@@ -310,15 +299,12 @@ function validate(p) {
         fb.innerText = "MISS";
         fb.className = "h-8 mt-2 font-bold text-xl tracking-wider text-danger animate-shake";
         
-        // Penalty Pull
         moveTug(p === 'p1' ? 'p2' : 'p1', 4);
         
-        // Anti-Spam Freeze Logic
         const now = Date.now();
         STATE.game[p].wrongTime.push(now);
         if(STATE.game[p].wrongTime.length > 3) STATE.game[p].wrongTime.shift();
         
-        // If 3 wrongs in 3 seconds -> FREEZE
         if(STATE.game[p].wrongTime.length === 3 && (now - STATE.game[p].wrongTime[0] < 3000)) {
             freezePlayer(p);
             STATE.game[p].wrongTime = [];
@@ -334,11 +320,9 @@ function moveTug(puller, amount) {
     if(puller === 'p1') STATE.game.tugValue -= amount;
     else STATE.game.tugValue += amount;
     
-    // Clamp
     if(STATE.game.tugValue < 0) STATE.game.tugValue = 0;
     if(STATE.game.tugValue > 100) STATE.game.tugValue = 100;
 
-    // Visual Camera Shake
     if(amount > 10) {
         document.body.classList.add('camera-shake');
         setTimeout(() => document.body.classList.remove('camera-shake'), 500);
@@ -346,25 +330,21 @@ function moveTug(puller, amount) {
 
     updateTugVisuals();
     
-    // Win Check
     if(STATE.game.tugValue <= 0) endGame(STATE.game.p1.name);
     else if(STATE.game.tugValue >= 100) endGame(STATE.game.p2.name);
 }
 
 function updateTugVisuals() {
-    const isMobile = window.innerWidth < 1024; // Use 1024 breakpoint for Tablets
-    let pct = STATE.game.tugValue - 50; // -50 to 50
+    const isMobile = window.innerWidth < 1024; 
+    let pct = STATE.game.tugValue - 50; 
     
-    // Visual limit clamping to keep marker on screen
     if(pct < -45) pct = -45;
     if(pct > 45) pct = 45;
 
     const marker = get('rope-marker');
     if(isMobile) {
-        // Vertical (Y Axis). Negative is UP (P1), Positive is DOWN (P2)
         marker.style.transform = `translateY(${pct}vh)`;
     } else {
-        // Horizontal (X Axis). Negative is LEFT (P1), Positive is RIGHT (P2)
         marker.style.transform = `translateX(${pct}vw)`;
     }
 }
@@ -386,17 +366,14 @@ function endGame(winnerName) {
     AUDIO.stopBGM();
     
     if(winnerName === "TIME'S UP!") {
-        // Determine winner by tug position
         if(STATE.game.tugValue < 50) winnerName = STATE.game.p1.name;
         else if(STATE.game.tugValue > 50) winnerName = STATE.game.p2.name;
         else winnerName = "DRAW";
     }
 
-    // Modal Setup
     get('winner-name').innerText = winnerName;
     get('winner-reason').innerText = (STATE.game.tugValue <= 0 || STATE.game.tugValue >= 100) ? "KNOCKOUT VICTORY!" : "TIME DECISION";
     
-    // Confetti
     if(winnerName !== "DRAW") {
         AUDIO.playSFX('sfx-win');
         confetti({ particleCount: 200, spread: 100, origin: { y: 0.6 } });
@@ -405,7 +382,6 @@ function endGame(winnerName) {
     get('modal-winner').classList.remove('hidden');
     get('modal-winner').classList.add('flex');
 
-    // Handle Tournament Progression
     const btn = get('btn-winner-continue');
     btn.onclick = () => {
         get('modal-winner').classList.add('hidden');
@@ -422,7 +398,6 @@ function endGame(winnerName) {
 /* --- TOURNAMENT ENGINE --- */
 window.setupTournament = () => {
     STATE.type = 'tournament';
-    // Resume Check
     const saved = localStorage.getItem('brainTugActive');
     if(saved) {
         if(confirm("Resume active tournament?")) {
@@ -474,23 +449,18 @@ function updatePlayerList() {
 window.removePlayer = (i) => { STATE.players.splice(i,1); updatePlayerList(); };
 
 window.generateBracket = () => {
-    // 1. Shuffle
     let p = [...STATE.players].sort(() => 0.5 - Math.random());
-    
-    // 2. Pad to Power of 2 (2, 4, 8, 16, 32, 64)
     const nextPow2 = Math.pow(2, Math.ceil(Math.log2(p.length)));
     while(p.length < nextPow2) p.push("BYE");
 
     STATE.bracket = [];
     
-    // 3. Create Round 1
     let r1 = [];
     for(let i=0; i<p.length; i+=2) {
         r1.push({ p1: p[i], p2: p[i+1], winner: null });
     }
     STATE.bracket.push(r1);
 
-    // 4. Create Empty Rounds (Tree Structure)
     let activeR = r1;
     while(activeR.length > 1) {
         let nextR = [];
@@ -501,19 +471,14 @@ window.generateBracket = () => {
         activeR = nextR;
     }
 
-    // 5. Auto-Advance BYEs
     resolveByes();
-    
-    // 6. Find First Match
     findNextMatch();
-    
     saveTournament();
     renderBracket();
     showScreen('screen-tourney-hub');
 };
 
 function resolveByes() {
-    // Only Round 1 has BYEs
     STATE.bracket[0].forEach((m, idx) => {
         if(m.p2 === "BYE") { m.winner = m.p1; forwardWinner(0, idx, m.p1); }
         else if(m.p1 === "BYE") { m.winner = m.p2; forwardWinner(0, idx, m.p2); }
@@ -521,7 +486,7 @@ function resolveByes() {
 }
 
 function forwardWinner(rIdx, mIdx, winnerName) {
-    if(rIdx + 1 >= STATE.bracket.length) return; // Final won
+    if(rIdx + 1 >= STATE.bracket.length) return; 
     
     const nextR = STATE.bracket[rIdx + 1];
     const nextMIdx = Math.floor(mIdx / 2);
@@ -529,8 +494,6 @@ function forwardWinner(rIdx, mIdx, winnerName) {
     
     nextR[nextMIdx][slot] = winnerName;
     
-    // Check if next match is against a BYE (Recursive auto-win)
-    // This handles rare edge cases in weird bracket sizes
     const oppSlot = (slot === 'p1') ? 'p2' : 'p1';
     if(nextR[nextMIdx][oppSlot] === "BYE") {
         nextR[nextMIdx].winner = winnerName;
@@ -549,7 +512,7 @@ function findNextMatch() {
             }
         }
     }
-    STATE.activeRound = -1; // Finished
+    STATE.activeRound = -1; 
 }
 
 function renderBracket() {
@@ -565,10 +528,10 @@ function renderBracket() {
         
         round.forEach((m, mIdx) => {
             const active = (rIdx === STATE.activeRound && mIdx === STATE.activeMatch);
-            let statusClass = "border-gray-700 bg-gray-800/50 opacity-50"; // Future/Done
+            let statusClass = "border-gray-700 bg-gray-800/50 opacity-50"; 
             if(active) statusClass = "border-yellow-400 bg-gray-800 shadow-lg scale-105 border-l-4 opacity-100";
             else if(m.winner) statusClass = "border-green-600 bg-gray-800/80 border-l-4 opacity-70";
-            else if(m.p1 !== 'TBD' && m.p2 !== 'TBD') statusClass = "border-blue-500 bg-gray-800 border-l-2 opacity-90"; // Ready but not active
+            else if(m.p1 !== 'TBD' && m.p2 !== 'TBD') statusClass = "border-blue-500 bg-gray-800 border-l-2 opacity-90"; 
 
             html += `
             <div class="p-3 rounded-lg border ${statusClass} transition-all flex justify-between items-center">
@@ -581,7 +544,6 @@ function renderBracket() {
         container.innerHTML += html;
     });
 
-    // Update Side Card
     const card = get('match-card-content');
     if(STATE.activeRound !== -1) {
         const m = STATE.bracket[STATE.activeRound][STATE.activeMatch];
@@ -595,7 +557,6 @@ function renderBracket() {
             <button onclick="prepareGame('${m.p1}', '${m.p2}')" class="w-full py-4 bg-accent text-dark font-bold rounded-xl shadow-lg hover:scale-105 transition">START MATCH</button>
         `;
     } else {
-        // Tournament Over
         const winner = STATE.bracket[STATE.bracket.length-1][0].winner;
         card.innerHTML = `
             <div class="text-accent font-bold text-xl uppercase mb-2">CHAMPION</div>
