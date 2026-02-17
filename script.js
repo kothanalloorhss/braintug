@@ -1,14 +1,15 @@
 /* =========================================
-   BRAIN TUG: ULTIMATE ENGINE (FINAL)
+   BRAIN TUG: PRO ENGINE (FINAL BUILD)
    ========================================= */
 
-/* --- STATE MANAGEMENT --- */
+/* --- 1. STATE MANAGEMENT --- */
 const STATE = {
     mode: 'math',          // 'math' or 'english'
     type: 'quick',         // 'quick' or 'tournament'
-    players: [],           // List of player names
-    bracket: [],           // Tournament tree
+    players: [],           // Current list of player names for setup
+    bracket: [],           // Tournament tree structure
     history: JSON.parse(localStorage.getItem('brainTugHistory')) || [],
+    stats: JSON.parse(localStorage.getItem('brainTugStats')) || {}, // Persistent performance data
     activeTourneyId: null, 
     activeRound: 0,
     activeMatch: 0,
@@ -18,17 +19,17 @@ const STATE = {
         timer: 60,
         interval: null,
         tugValue: 50,      // 0 (P1 Win) -- 50 (Center) -- 100 (P2 Win)
-        p1: { name:'', score:0, streak:0, frozen:false, ans:'', q:null, wrongTime:[] },
-        p2: { name:'', score:0, streak:0, frozen:false, ans:'', q:null, wrongTime:[] }
+        p1: { name:'', score:0, streak:0, frozen:false, processing:false, ans:'', q:null, wrongTime:[], startTime:0 },
+        p2: { name:'', score:0, streak:0, frozen:false, processing:false, ans:'', q:null, wrongTime:[], startTime:0 }
     }
 };
 
-/* --- DOM UTILS --- */
+/* --- 2. DOM UTILS --- */
 const get = (id) => document.getElementById(id);
 const hideAllScreens = () => document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
 
-// Smart Screen Switcher
-function showScreen(id) {
+// Global Screen Switcher (Exposed for HTML buttons)
+window.showScreen = (id) => {
     hideAllScreens();
     const el = get(id);
     if(el) {
@@ -38,15 +39,13 @@ function showScreen(id) {
             el.classList.add('flex');
         }
     }
-}
-// Expose for HTML buttons
-window.showScreen = showScreen; 
+};
 
-/* --- AUDIO ENGINE --- */
+/* --- 3. AUDIO ENGINE --- */
 const AUDIO = {
     bgm: get('bgm'),
     muted: false,
-    playBGM: () => { if(!AUDIO.muted && AUDIO.bgm) { AUDIO.bgm.volume=0.3; AUDIO.bgm.play().catch(()=>{}); } },
+    playBGM: () => { if(!AUDIO.muted && AUDIO.bgm) { AUDIO.bgm.volume=0.2; AUDIO.bgm.play().catch(()=>{}); } },
     stopBGM: () => { if(AUDIO.bgm) { AUDIO.bgm.pause(); AUDIO.bgm.currentTime=0; } },
     playSFX: (id) => { 
         if(AUDIO.muted) return;
@@ -62,71 +61,125 @@ window.toggleMute = () => {
     if(AUDIO.muted) AUDIO.stopBGM(); else if(STATE.game.active) AUDIO.playBGM();
 };
 
-/* --- MENU LOGIC --- */
+/* --- 4. TEACHER & STATS SYSTEM --- */
+function updateStats(name, isCorrect, timeTaken) {
+    if(!name || name.startsWith("Player")) return; // Don't track generic names
+    if(!STATE.stats[name]) STATE.stats[name] = { score:0, timeSum:0, ansCount:0 };
+    
+    if(isCorrect) STATE.stats[name].score += 10;
+    STATE.stats[name].timeSum += timeTaken;
+    STATE.stats[name].ansCount++;
+    
+    localStorage.setItem('brainTugStats', JSON.stringify(STATE.stats));
+}
+
+window.showTeacherLogin = () => {
+    const pass = prompt("Enter Teacher Password:");
+    if(pass === "admin") { // Default Password
+        const tbody = get('teacher-table-body'); 
+        tbody.innerHTML = '';
+        
+        if(Object.keys(STATE.stats).length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-gray-500">No data available.</td></tr>';
+        } else {
+            Object.keys(STATE.stats).forEach(name => {
+                const s = STATE.stats[name];
+                const avgSpeed = s.ansCount ? Math.round(s.timeSum / s.ansCount) : 0;
+                tbody.innerHTML += `
+                    <tr class="border-b border-gray-700 hover:bg-white/5">
+                        <td class="p-3 font-bold text-white">${name}</td>
+                        <td class="p-3 text-accent">${s.score}</td>
+                        <td class="p-3 font-mono">${avgSpeed}ms</td>
+                        <td class="p-3">${s.ansCount}</td>
+                    </tr>`;
+            });
+        }
+        get('modal-teacher').classList.remove('hidden');
+        get('modal-teacher').classList.add('flex');
+    } else if(pass !== null) {
+        alert("Incorrect Password");
+    }
+};
+
+window.hideTeacher = () => { get('modal-teacher').classList.add('hidden'); get('modal-teacher').classList.remove('flex'); };
+window.clearStats = () => { 
+    if(confirm("Are you sure? This will delete all student performance records.")) { 
+        STATE.stats={}; 
+        localStorage.removeItem('brainTugStats'); 
+        window.hideTeacher(); 
+    } 
+};
+
+/* --- 5. MENU & NAVIGATION --- */
 window.setGameMode = (m) => {
     STATE.mode = m;
     get('btn-mode-math').className = m==='math' ? 
         "px-4 py-2 rounded-lg font-bold transition bg-p1 text-white shadow-lg" : 
         "px-4 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white";
     get('btn-mode-eng').className = m==='english' ? 
-        "px-4 py-2 rounded-lg font-bold transition text-white shadow-lg bg-orange-600" : 
+        "px-4 py-2 rounded-lg font-bold transition text-white shadow-lg bg-accent" : 
         "px-4 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white";
 };
 
-/* --- QUICK PLAY --- */
-window.setupQuickPlay = () => { STATE.type='quick'; showScreen('modal-quick-setup'); };
+window.setupQuickPlay = () => { 
+    STATE.type='quick'; 
+    get('modal-quick-setup').classList.remove('hidden'); 
+    get('modal-quick-setup').classList.add('flex'); 
+};
+
 window.startQuickGameFromModal = () => {
     const p1 = get('qp-p1').value.trim() || 'Player 1';
     const p2 = get('qp-p2').value.trim() || 'Player 2';
-    showScreen('modal-quick-setup'); // Hides modal via screen switch
+    get('modal-quick-setup').classList.add('hidden'); 
+    get('modal-quick-setup').classList.remove('flex'); 
     prepareGame(p1, p2);
 };
 
-/* --- GAME LOOP & CORE LOGIC --- */
+/* --- 6. GAME LIFECYCLE --- */
 window.prepareGame = (p1Name, p2Name) => {
-    // 1. Reset Game State
+    // Reset Logic
     STATE.game.active = false;
     STATE.game.timer = 60;
     STATE.game.tugValue = 50;
     
-    // 2. Difficulty Scaling
-    let diff = 1;
+    // Difficulty Scaling based on Tourney Round
+    let diff = 1; 
     if(STATE.type === 'tournament') {
         const remaining = STATE.bracket.length - STATE.activeRound;
-        if(remaining <= 2) diff = 3; // Hard in Semi/Final
-        else if(remaining <= 3) diff = 2; // Normal in QF
+        if(remaining <= 2) diff = 3; // Semi/Final
+        else if(remaining <= 3) diff = 2; // QF
     }
     STATE.game.difficulty = diff;
 
-    // 3. Setup Players
     setupPlayer('p1', p1Name);
     setupPlayer('p2', p2Name);
 
-    // 4. UI Reset
+    // UI Reset
     updateTugVisuals();
-    get('timer-box').className = "bg-black/80 px-3 py-1 rounded-full border border-gray-600 backdrop-blur shadow-xl transition-colors duration-300";
+    const tBox = get('timer-box');
+    tBox.className = "bg-black/80 px-3 py-1 rounded-full border border-gray-600 backdrop-blur shadow-xl transition-colors duration-300";
     get('game-timer').classList.remove('text-red-500');
 
-    // 5. Show Screen & Count Down
-    showScreen('screen-game');
+    window.showScreen('screen-game');
     runCountdown();
 };
 
 function setupPlayer(key, name) {
-    STATE.game[key] = { name: name, score: 0, streak: 0, frozen: false, ans: '', q: null, wrongTime: [] };
+    STATE.game[key] = { 
+        name: name, score:0, streak:0, frozen:false, processing:false, 
+        ans:'', q:null, wrongTime:[], startTime:0 
+    };
     get(`${key}-name`).innerText = name;
     get(`${key}-score`).innerText = "0";
     get(`${key}-input`).innerText = "";
     
-    // Reset Feedback styles
+    // Clear feedback
     const fb = get(`${key}-feedback`);
-    fb.innerText = "";
-    fb.style.opacity = "0";
-    fb.className = "absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 font-bold text-4xl opacity-0 pointer-events-none z-50";
+    fb.innerText = ""; fb.style.opacity = "0"; fb.className = "";
 
     get(`${key}-frozen`).classList.add('hidden');
     get(`${key}-combo`).classList.add('hidden');
-    get(`zone-${key}`).classList.remove('border-yellow-400'); 
+    get(`zone-${key}`).classList.remove('border-yellow-400'); // Remove glow
 }
 
 function runCountdown() {
@@ -139,7 +192,7 @@ function runCountdown() {
     text.innerText = count;
     text.className = "text-9xl font-black text-yellow-400 animate-bounce";
     
-    // Play Countdown Music ONCE
+    // Play sound ONCE at start
     AUDIO.playSFX('sfx-countdown');
     
     const int = setInterval(() => {
@@ -149,7 +202,7 @@ function runCountdown() {
         } else if (count === 0) {
             text.innerText = "FIGHT!";
             text.className = "text-8xl font-black text-red-500 animate-pop";
-            AUDIO.playSFX('sfx-win'); // Fight/Go sound
+            AUDIO.playSFX('sfx-win'); // Fight sound
         } else {
             clearInterval(int);
             overlay.classList.add('hidden');
@@ -172,17 +225,19 @@ function gameTick() {
     STATE.game.timer--;
     get('game-timer').innerText = STATE.game.timer;
 
+    // Sudden Death Visuals
     if(STATE.game.timer <= 10) {
         get('timer-box').classList.add('border-red-500', 'animate-pulse');
         get('game-timer').classList.add('text-red-500');
     }
 
+    // Difficulty Ramp
     if(STATE.game.timer % 15 === 0 && STATE.game.difficulty < 5) STATE.game.difficulty++;
 
     if(STATE.game.timer <= 0) endGame("TIME'S UP!");
 }
 
-/* --- QUESTION ENGINE --- */
+/* --- 7. QUESTION ENGINE --- */
 const ENG_DICT = [
     {f:"APPLE",m:"A_PLE",a:2,o:["R","P","S"]}, {f:"TIGER",m:"TI_ER",a:3,o:["A","I","G"]}, {f:"HOUSE",m:"HO_SE",a:1,o:["U","A","E"]},
     {f:"WATER",m:"WA_ER",a:3,o:["P","D","T"]}, {f:"ROBOT",m:"ROB_T",a:3,o:["A","I","O"]}, {f:"MUSIC",m:"MUS_C",a:2,o:["K","I","E"]},
@@ -221,6 +276,7 @@ function generateQuestion(p) {
     }
 
     STATE.game[p].q = q;
+    STATE.game[p].startTime = Date.now(); // Start timing
     renderQuestion(p, q);
 }
 
@@ -241,36 +297,40 @@ function renderQuestion(p, q) {
     }
 }
 
-/* --- INPUT & SCORING --- */
+/* --- 8. INPUT & SCORING --- */
+// Keyboard Listener
 document.addEventListener('keydown', (e) => {
     if(!STATE.game.active) return;
     const k=e.key, c=e.code;
     
-    // Keyboard Logic
+    // P1: Digits (Top Row)
     if(!STATE.game.p1.frozen) {
         if(c.startsWith('Digit') && "0123456789".includes(k)) handleInput('p1', k);
         if(c==='KeyS') clearInput('p1');
     }
+    // P2: Numpad
     if(!STATE.game.p2.frozen) {
         if(c.startsWith('Numpad') && "0123456789".includes(k)) handleInput('p2', k);
         if(c==='Backspace') clearInput('p2');
     }
 });
 
-// Mobile/Mouse Logic
+// Mobile/OnScreen Hooks
 window.tapInput = (p, k) => handleInput(p, k);
 window.tapClear = (p) => clearInput(p);
 
 function handleInput(p, char) {
-    if(STATE.game[p].frozen) return;
+    if(STATE.game[p].frozen || STATE.game[p].processing) return; // Debounce
     const q = STATE.game[p].q;
     if(!q) return;
 
     STATE.game[p].ans += char;
     get(`${p}-input`).innerText = STATE.game[p].ans;
     
+    // Auto-Validate on Length Match
     const reqLen = q.ans.toString().length;
     if(STATE.game[p].ans.length >= reqLen) {
+        STATE.game[p].processing = true; // Lock input
         setTimeout(() => validate(p), 50);
     }
 }
@@ -281,29 +341,39 @@ function validate(p) {
     const val = parseInt(STATE.game[p].ans);
     const correct = STATE.game[p].q.ans;
     const fb = get(`${p}-feedback`);
+    const timeTaken = Date.now() - STATE.game[p].startTime;
     
     if(val === correct) {
+        // --- CORRECT ---
+        updateStats(STATE.game[p].name, true, timeTaken);
+        
         STATE.game[p].score++;
         STATE.game[p].streak++;
         get(`${p}-score`).innerText = STATE.game[p].score;
         AUDIO.playSFX('sfx-correct');
         
+        // Feedback
         fb.innerText = "GOOD!";
         fb.style.opacity = "1";
         fb.className = "absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 font-bold text-4xl text-accent animate-pop pointer-events-none z-50";
         
+        // Power Calc
         let power = 8;
         if(STATE.game[p].streak >= 3) {
             power = 15;
             get(`${p}-combo`).classList.remove('hidden');
-            get(`zone-${p}`).classList.add('border-yellow-400'); 
+            get(`zone-${p}`).classList.add('border-yellow-400'); // Glow
         }
+        // Rubber Banding
         if(p==='p1' && STATE.game.tugValue > 80) power += 5;
         if(p==='p2' && STATE.game.tugValue < 20) power += 5;
 
         moveTug(p, power);
 
     } else {
+        // --- WRONG ---
+        updateStats(STATE.game[p].name, false, timeTaken);
+        
         STATE.game[p].streak = 0;
         get(`${p}-combo`).classList.add('hidden');
         get(`zone-${p}`).classList.remove('border-yellow-400');
@@ -313,30 +383,40 @@ function validate(p) {
         fb.style.opacity = "1";
         fb.className = "absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 font-bold text-4xl text-danger animate-shake pointer-events-none z-50";
         
+        // Penalty
         moveTug(p === 'p1' ? 'p2' : 'p1', 4);
         
+        // Anti-Spam
         const now = Date.now();
         STATE.game[p].wrongTime.push(now);
         if(STATE.game[p].wrongTime.length > 3) STATE.game[p].wrongTime.shift();
         
+        // Freeze if 3 wrongs in 3s
         if(STATE.game[p].wrongTime.length === 3 && (now - STATE.game[p].wrongTime[0] < 3000)) {
             freezePlayer(p);
             STATE.game[p].wrongTime = [];
         }
     }
 
-    setTimeout(() => { fb.style.opacity = "0"; }, 600);
+    // Cleanup & Next Q
+    setTimeout(() => { 
+        fb.style.opacity = "0"; 
+        STATE.game[p].processing = false; // Unlock
+    }, 600);
     clearInput(p);
     generateQuestion(p);
 }
 
+/* --- 9. TUG PHYSICS --- */
 function moveTug(puller, amount) {
     if(puller === 'p1') STATE.game.tugValue -= amount;
     else STATE.game.tugValue += amount;
     
+    // Clamp
     if(STATE.game.tugValue < 0) STATE.game.tugValue = 0;
     if(STATE.game.tugValue > 100) STATE.game.tugValue = 100;
 
+    // Shake screen on big hits
     if(amount > 10) {
         document.body.classList.add('camera-shake');
         setTimeout(() => document.body.classList.remove('camera-shake'), 500);
@@ -344,6 +424,7 @@ function moveTug(puller, amount) {
 
     updateTugVisuals();
     
+    // Check Win
     if(STATE.game.tugValue <= 0) endGame(STATE.game.p1.name);
     else if(STATE.game.tugValue >= 100) endGame(STATE.game.p2.name);
 }
@@ -352,13 +433,16 @@ function updateTugVisuals() {
     const isMobile = window.innerWidth < 1024; 
     let pct = STATE.game.tugValue - 50; 
     
+    // Visual clamping to keep marker onscreen
     if(pct < -45) pct = -45;
     if(pct > 45) pct = 45;
 
     const marker = get('rope-marker');
     if(isMobile) {
+        // Y Axis (Vertical)
         marker.style.transform = `translateY(${pct}vh)`;
     } else {
+        // X Axis (Horizontal)
         marker.style.transform = `translateX(${pct}vw)`;
     }
 }
@@ -404,36 +488,39 @@ function endGame(winnerName) {
         if(STATE.type === 'tournament') {
             handleTournamentWin(winnerName);
         } else {
-            showScreen('screen-menu');
+            window.showScreen('screen-menu');
         }
     };
 }
 
-/* --- TOURNAMENT ENGINE --- */
+/* --- 10. TOURNAMENT ENGINE --- */
 window.setupTournament = () => {
     STATE.type = 'tournament';
     
+    // 1. Check for Active Resume
     let saved = null;
-    try {
-        saved = localStorage.getItem('brainTugActive');
-        if(saved) saved = JSON.parse(saved);
-    } catch(e) {
-        localStorage.removeItem('brainTugActive');
+    try { saved = JSON.parse(localStorage.getItem('brainTugActive')); } catch(e) {}
+
+    if(saved && confirm("Resume active tournament round?")) {
+        loadTournament(saved);
+        return;
     }
 
-    if(saved) {
-        if(confirm("Resume active tournament?")) {
-            loadTournament(saved);
-            return;
+    // 2. Check for Previous Player List to reload
+    const prevPlayers = JSON.parse(localStorage.getItem('brainTugLastPlayers'));
+    if(prevPlayers && prevPlayers.length > 0) {
+        if(confirm(`Reload previous list of ${prevPlayers.length} students?`)) {
+            STATE.players = prevPlayers;
         } else {
-            localStorage.removeItem('brainTugActive');
+            STATE.players = [];
         }
+    } else {
+        STATE.players = [];
     }
     
-    STATE.players = [];
     STATE.activeTourneyId = Date.now();
     updatePlayerList();
-    showScreen('screen-tourney-setup');
+    window.showScreen('screen-tourney-setup');
 };
 
 function loadTournament(data) {
@@ -443,17 +530,15 @@ function loadTournament(data) {
     STATE.activeMatch = data.match;
     STATE.activeTourneyId = data.id;
     renderBracket();
-    showScreen('screen-tourney-hub');
+    window.showScreen('screen-tourney-hub');
 }
 
-// Fixed Function Name: Matches HTML onclick="addTourneyPlayer()"
 window.addTourneyPlayer = () => {
     const inp = get('tourney-input');
     const name = inp.value.trim();
     if(name) { STATE.players.push(name); inp.value=''; updatePlayerList(); }
 };
 
-// Fixed Function Name: Matches HTML onclick="clearPlayers()" (or clearTourneySetup)
 window.clearPlayers = () => { STATE.players=[]; updatePlayerList(); };
 
 function updatePlayerList() {
@@ -469,27 +554,40 @@ function updatePlayerList() {
     const btn = get('btn-generate');
     if(STATE.players.length >= 2) {
         btn.classList.remove('hidden');
-        btn.innerText = `START (${STATE.players.length} Players)`;
+        btn.innerText = `START BRACKET (${STATE.players.length})`;
     } else {
         btn.classList.add('hidden');
     }
+    // Save for next time
+    localStorage.setItem('brainTugLastPlayers', JSON.stringify(STATE.players));
 }
+
 window.removePlayer = (i) => { STATE.players.splice(i,1); updatePlayerList(); };
 
-// Fixed Function Name: Matches HTML onclick="generateBracket()" (or generateFixture)
+/* --- SMART SEEDING & BRACKET GEN --- */
 window.generateBracket = () => {
-    let p = [...STATE.players].sort(() => 0.5 - Math.random());
+    let p = [...STATE.players];
+    
+    // Smart Seed: Sort by Stats (High Skill vs High Skill)
+    p.sort((a,b) => {
+        const sA = STATE.stats[a] ? (STATE.stats[a].score / (STATE.stats[a].ansCount||1)) : 0;
+        const sB = STATE.stats[b] ? (STATE.stats[b].score / (STATE.stats[b].ansCount||1)) : 0;
+        return sB - sA; // Descending
+    });
+
     const nextPow2 = Math.pow(2, Math.ceil(Math.log2(p.length)));
     while(p.length < nextPow2) p.push("BYE");
 
     STATE.bracket = [];
     
+    // Round 1
     let r1 = [];
     for(let i=0; i<p.length; i+=2) {
         r1.push({ p1: p[i], p2: p[i+1], winner: null });
     }
     STATE.bracket.push(r1);
 
+    // Empty Rounds
     let activeR = r1;
     while(activeR.length > 1) {
         let nextR = [];
@@ -504,7 +602,7 @@ window.generateBracket = () => {
     findNextMatch();
     saveTournament();
     renderBracket();
-    showScreen('screen-tourney-hub');
+    window.showScreen('screen-tourney-hub');
 };
 
 function resolveByes() {
@@ -541,7 +639,7 @@ function findNextMatch() {
             }
         }
     }
-    STATE.activeRound = -1; 
+    STATE.activeRound = -1; // Finished
 }
 
 function renderBracket() {
@@ -603,10 +701,9 @@ function handleTournamentWin(winner) {
     findNextMatch();
     saveTournament();
     renderBracket();
-    showScreen('screen-tourney-hub');
+    window.showScreen('screen-tourney-hub');
 }
 
-/* --- PERSISTENCE --- */
 function saveTournament() {
     const data = { 
         id: STATE.activeTourneyId, 
@@ -618,7 +715,7 @@ function saveTournament() {
     localStorage.setItem('brainTugActive', JSON.stringify(data));
 }
 
-window.saveAndExit = () => { saveTournament(); showScreen('screen-menu'); };
+window.saveAndExit = () => { saveTournament(); window.showScreen('screen-menu'); };
 
 function finishTournament(winner) {
     const record = {
@@ -629,7 +726,7 @@ function finishTournament(winner) {
     STATE.history.unshift(record);
     localStorage.setItem('brainTugHistory', JSON.stringify(STATE.history));
     localStorage.removeItem('brainTugActive');
-    showScreen('screen-menu');
+    window.showScreen('screen-menu');
 }
 
 window.showHistory = () => {
@@ -646,7 +743,7 @@ window.showHistory = () => {
             </div>
         `).join('');
     }
-    showScreen('screen-history');
+    window.showScreen('screen-history');
 };
 
 window.clearHistory = () => {
