@@ -1,5 +1,5 @@
 /* =========================================
-   BRAIN TUG: ULTIMATE ENGINE (FIXED)
+   BRAIN TUG: ULTIMATE ENGINE (FINAL)
    ========================================= */
 
 /* --- STATE MANAGEMENT --- */
@@ -14,7 +14,7 @@ const STATE = {
     activeMatch: 0,
     game: {
         active: false,
-        difficulty: 1,     
+        difficulty: 1,     // 1 to 5
         timer: 60,
         interval: null,
         tugValue: 50,      // 0 (P1 Win) -- 50 (Center) -- 100 (P2 Win)
@@ -33,11 +33,14 @@ function showScreen(id) {
     const el = get(id);
     if(el) {
         el.classList.remove('hidden');
-        if(id.includes('game') || id.includes('menu') || id.includes('setup') || id.includes('hub') || id.includes('history')) {
+        // Restore flex layout for screens that need it
+        if(id.includes('game') || id.includes('menu') || id.includes('setup') || id.includes('hub') || id.includes('history') || id.includes('modal')) {
             el.classList.add('flex');
         }
     }
 }
+// Expose for HTML buttons
+window.showScreen = showScreen; 
 
 /* --- AUDIO ENGINE --- */
 const AUDIO = {
@@ -63,11 +66,11 @@ window.toggleMute = () => {
 window.setGameMode = (m) => {
     STATE.mode = m;
     get('btn-mode-math').className = m==='math' ? 
-        "px-6 py-2 rounded-lg font-bold transition bg-p1 text-white shadow-lg ring-2 ring-blue-400" : 
-        "px-6 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white";
+        "px-4 py-2 rounded-lg font-bold transition bg-p1 text-white shadow-lg" : 
+        "px-4 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white";
     get('btn-mode-eng').className = m==='english' ? 
-        "px-6 py-2 rounded-lg font-bold transition bg-orange-600 text-white shadow-lg ring-2 ring-orange-400" : 
-        "px-6 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white";
+        "px-4 py-2 rounded-lg font-bold transition text-white shadow-lg bg-orange-600" : 
+        "px-4 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white";
 };
 
 /* --- QUICK PLAY --- */
@@ -75,12 +78,12 @@ window.setupQuickPlay = () => { STATE.type='quick'; showScreen('modal-quick-setu
 window.startQuickGameFromModal = () => {
     const p1 = get('qp-p1').value.trim() || 'Player 1';
     const p2 = get('qp-p2').value.trim() || 'Player 2';
-    showScreen('modal-quick-setup'); 
+    showScreen('modal-quick-setup'); // Hides modal via screen switch
     prepareGame(p1, p2);
 };
 
 /* --- GAME LOOP & CORE LOGIC --- */
-function prepareGame(p1Name, p2Name) {
+window.prepareGame = (p1Name, p2Name) => {
     // 1. Reset Game State
     STATE.game.active = false;
     STATE.game.timer = 60;
@@ -101,21 +104,26 @@ function prepareGame(p1Name, p2Name) {
 
     // 4. UI Reset
     updateTugVisuals();
-    get('timer-box').className = "bg-black/80 px-4 py-2 rounded-full border border-gray-600 backdrop-blur shadow-xl transition-colors duration-300";
+    get('timer-box').className = "bg-black/80 px-3 py-1 rounded-full border border-gray-600 backdrop-blur shadow-xl transition-colors duration-300";
     get('game-timer').classList.remove('text-red-500');
 
     // 5. Show Screen & Count Down
     showScreen('screen-game');
     runCountdown();
-}
+};
 
 function setupPlayer(key, name) {
     STATE.game[key] = { name: name, score: 0, streak: 0, frozen: false, ans: '', q: null, wrongTime: [] };
-    // Fix: ID names match HTML (e.g. p1-name, not name-p1)
     get(`${key}-name`).innerText = name;
     get(`${key}-score`).innerText = "0";
     get(`${key}-input`).innerText = "";
-    get(`${key}-feedback`).innerText = "";
+    
+    // Reset Feedback styles
+    const fb = get(`${key}-feedback`);
+    fb.innerText = "";
+    fb.style.opacity = "0";
+    fb.className = "absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 font-bold text-4xl opacity-0 pointer-events-none z-50";
+
     get(`${key}-frozen`).classList.add('hidden');
     get(`${key}-combo`).classList.add('hidden');
     get(`zone-${key}`).classList.remove('border-yellow-400'); 
@@ -140,8 +148,8 @@ function runCountdown() {
             text.innerText = count;
         } else if (count === 0) {
             text.innerText = "FIGHT!";
-            text.className = "text-9xl font-black text-red-500 animate-ping-slow";
-            AUDIO.playSFX('sfx-win'); // Start sound
+            text.className = "text-8xl font-black text-red-500 animate-pop";
+            AUDIO.playSFX('sfx-win'); // Fight/Go sound
         } else {
             clearInterval(int);
             overlay.classList.add('hidden');
@@ -193,17 +201,17 @@ function generateQuestion(p) {
 
     if(STATE.mode === 'math') {
         let a,b,op,ans;
-        const typeRoll = Math.random();
+        const r = Math.random();
         
         if(diff === 1) { 
-            if(typeRoll > 0.5) { a=rand(10); b=rand(10); op='+'; ans=a+b; }
+            if(r > 0.5) { a=rand(10); b=rand(10); op='+'; ans=a+b; }
             else { a=rand(15)+3; b=rand(a); op='-'; ans=a-b; }
         } else if(diff === 2) { 
-            if(typeRoll > 0.6) { a=rand(9)+1; b=rand(9)+1; op='x'; ans=a*b; }
+            if(r > 0.6) { a=rand(9)+1; b=rand(9)+1; op='x'; ans=a*b; }
             else { a=rand(20); b=rand(20); op='+'; ans=a+b; }
         } else { 
-             if(typeRoll < 0.25) { b=rand(8)+2; a=b*(rand(9)+1); op='÷'; ans=a/b; }
-             else if(typeRoll < 0.5) { a=rand(12)+2; b=rand(12)+2; op='x'; ans=a*b; }
+             if(r < 0.25) { b=rand(8)+2; a=b*(rand(9)+1); op='÷'; ans=a/b; }
+             else if(r < 0.5) { a=rand(12)+2; b=rand(12)+2; op='x'; ans=a*b; }
              else { a=rand(50); b=rand(50); op='+'; ans=a+b; }
         }
         q = { t:'math', txt:`${a} ${op} ${b}`, ans:ans };
@@ -219,7 +227,6 @@ function generateQuestion(p) {
 function rand(n){return Math.floor(Math.random()*n)+1;}
 
 function renderQuestion(p, q) {
-    // Fix: ID names match HTML (e.g. p1-q-text)
     get(`${p}-q-text`).innerText = q.txt;
     const opts = get(`${p}-q-opts`);
     if(q.t === 'eng') {
@@ -260,7 +267,6 @@ function handleInput(p, char) {
     if(!q) return;
 
     STATE.game[p].ans += char;
-    // Fix: ID names match HTML (p1-input)
     get(`${p}-input`).innerText = STATE.game[p].ans;
     
     const reqLen = q.ans.toString().length;
@@ -274,23 +280,21 @@ function clearInput(p) { STATE.game[p].ans = ''; get(`${p}-input`).innerText = '
 function validate(p) {
     const val = parseInt(STATE.game[p].ans);
     const correct = STATE.game[p].q.ans;
-    // Fix: ID name p1-feedback
     const fb = get(`${p}-feedback`);
     
     if(val === correct) {
         STATE.game[p].score++;
         STATE.game[p].streak++;
-        // Fix: ID name p1-score
         get(`${p}-score`).innerText = STATE.game[p].score;
         AUDIO.playSFX('sfx-correct');
         
         fb.innerText = "GOOD!";
-        fb.className = "h-8 mt-1 font-bold text-xl tracking-wider text-accent animate-pop";
+        fb.style.opacity = "1";
+        fb.className = "absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 font-bold text-4xl text-accent animate-pop pointer-events-none z-50";
         
         let power = 8;
         if(STATE.game[p].streak >= 3) {
             power = 15;
-            // Fix: ID name p1-combo
             get(`${p}-combo`).classList.remove('hidden');
             get(`zone-${p}`).classList.add('border-yellow-400'); 
         }
@@ -306,7 +310,8 @@ function validate(p) {
         
         AUDIO.playSFX('sfx-wrong');
         fb.innerText = "MISS";
-        fb.className = "h-8 mt-1 font-bold text-xl tracking-wider text-danger animate-shake";
+        fb.style.opacity = "1";
+        fb.className = "absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 font-bold text-4xl text-danger animate-shake pointer-events-none z-50";
         
         moveTug(p === 'p1' ? 'p2' : 'p1', 4);
         
@@ -320,7 +325,7 @@ function validate(p) {
         }
     }
 
-    setTimeout(() => fb.innerText = "", 800);
+    setTimeout(() => { fb.style.opacity = "0"; }, 600);
     clearInput(p);
     generateQuestion(p);
 }
@@ -344,7 +349,6 @@ function moveTug(puller, amount) {
 }
 
 function updateTugVisuals() {
-    // Universal check for mobile orientation
     const isMobile = window.innerWidth < 1024; 
     let pct = STATE.game.tugValue - 50; 
     
@@ -353,10 +357,8 @@ function updateTugVisuals() {
 
     const marker = get('rope-marker');
     if(isMobile) {
-        // Y Axis
         marker.style.transform = `translateY(${pct}vh)`;
     } else {
-        // X Axis
         marker.style.transform = `translateX(${pct}vw)`;
     }
 }
@@ -410,13 +412,12 @@ function endGame(winnerName) {
 /* --- TOURNAMENT ENGINE --- */
 window.setupTournament = () => {
     STATE.type = 'tournament';
-    // Robust local storage check
+    
     let saved = null;
     try {
         saved = localStorage.getItem('brainTugActive');
         if(saved) saved = JSON.parse(saved);
     } catch(e) {
-        console.warn("Corrupt save data", e);
         localStorage.removeItem('brainTugActive');
     }
 
@@ -445,18 +446,21 @@ function loadTournament(data) {
     showScreen('screen-tourney-hub');
 }
 
-window.addPlayer = () => {
+// Fixed Function Name: Matches HTML onclick="addTourneyPlayer()"
+window.addTourneyPlayer = () => {
     const inp = get('tourney-input');
     const name = inp.value.trim();
     if(name) { STATE.players.push(name); inp.value=''; updatePlayerList(); }
 };
+
+// Fixed Function Name: Matches HTML onclick="clearPlayers()" (or clearTourneySetup)
 window.clearPlayers = () => { STATE.players=[]; updatePlayerList(); };
 
 function updatePlayerList() {
     get('player-count').innerText = `${STATE.players.length} Players`;
     const list = get('player-list');
     list.innerHTML = STATE.players.map((p, i) => 
-        `<li class="flex justify-between items-center bg-gray-800 p-3 rounded-lg border border-gray-700 animate-pop">
+        `<li class="flex justify-between items-center bg-gray-800 p-2 rounded-lg border border-gray-700 animate-pop">
             <span class="font-bold text-white">${i+1}. ${p}</span>
             <button onclick="removePlayer(${i})" class="text-red-400 hover:text-white"><i class="fas fa-times"></i></button>
         </li>`
@@ -472,6 +476,7 @@ function updatePlayerList() {
 }
 window.removePlayer = (i) => { STATE.players.splice(i,1); updatePlayerList(); };
 
+// Fixed Function Name: Matches HTML onclick="generateBracket()" (or generateFixture)
 window.generateBracket = () => {
     let p = [...STATE.players].sort(() => 0.5 - Math.random());
     const nextPow2 = Math.pow(2, Math.ceil(Math.log2(p.length)));
