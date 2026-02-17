@@ -58,6 +58,9 @@
         /* UI Styles */
         .glass { background: rgba(30, 41, 59, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
         
+        /* Admin Match Selection Hover Effect */
+        .match-card:hover { border-color: #fbbf24; cursor: pointer; transform: scale(1.02); }
+
         /* Mobile Specifics */
         @media (max-width: 1023px) { 
             .mobile-rotate { transform: rotate(180deg); }
@@ -297,7 +300,7 @@
             <div class="overflow-y-auto flex-1 border border-gray-700 rounded-lg">
                 <table class="w-full text-left text-sm text-gray-300">
                     <thead class="bg-gray-800 text-gray-400 sticky top-0">
-                        <tr><th class="p-3">Name</th><th class="p-3">Score</th><th class="p-3">Speed (ms)</th><th class="p-3">Count</th></tr>
+                        <tr><th class="p-3">Name</th><th class="p-3">Score</th><th class="p-3">Acc %</th><th class="p-3">Rank</th></tr>
                     </thead>
                     <tbody id="teacher-table-body" class="divide-y divide-gray-700"></tbody>
                 </table>
