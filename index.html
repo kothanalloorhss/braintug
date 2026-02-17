@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Brain Tug: Tournament Edition</title>
+    <title>Brain Tug: Pro Edition</title>
+    
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
     
     <script src="https://cdn.tailwindcss.com"></script>
@@ -25,6 +26,7 @@
                     animation: {
                         'shake': 'shake 0.4s cubic-bezier(.36,.07,.19,.97) both',
                         'pop': 'pop 0.2s ease-out',
+                        'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
                     },
                     keyframes: {
                         shake: {
@@ -41,17 +43,24 @@
     </script>
 
     <style>
-        /* Strict No-Scroll & Layout */
+        /* Core Physics & Layout */
         html, body { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; overscroll-behavior: none; }
         body { touch-action: none; -webkit-user-select: none; user-select: none; }
         
-        #rope-marker { transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-shadow: 0 0 30px rgba(234, 179, 8, 0.6); }
-        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        /* Rope Logic: Ensure it stays on top */
+        #rope-container { pointer-events: none; z-index: 0; }
+        #rope-marker { 
+            transition: transform 0.2s linear; 
+            box-shadow: 0 0 30px rgba(234, 179, 8, 0.8); 
+            z-index: 50; 
+        }
+
+        /* UI Styles */
+        .glass { background: rgba(30, 41, 59, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
         
         /* Mobile Specifics */
         @media (max-width: 1023px) { 
             .mobile-rotate { transform: rotate(180deg); }
-            /* Ultra Compact Fonts for Split Screen */
             .compact-text { font-size: 1.5rem !important; } 
             .compact-input { font-size: 2rem !important; min-height: 40px !important; }
         }
@@ -78,6 +87,9 @@
     <button onclick="toggleMute()" class="fixed top-2 right-2 z-[100] glass p-2 rounded-full hover:bg-white/10 transition active:scale-95">
         <i class="fas fa-volume-up text-white text-sm" id="icon-mute"></i>
     </button>
+    <button onclick="showTeacherLogin()" class="fixed top-2 left-2 z-[100] glass p-2 rounded-full hover:bg-white/10 transition active:scale-95">
+        <i class="fas fa-chalkboard-teacher text-white text-sm"></i>
+    </button>
 
     <div id="countdown-overlay" class="fixed inset-0 z-[90] bg-black/95 hidden flex-col items-center justify-center pointer-events-none">
         <div id="countdown-text" class="text-9xl font-black text-yellow-400 animate-bounce">3</div>
@@ -86,48 +98,65 @@
     <div id="screen-menu" class="screen flex flex-col items-center justify-center h-full w-full p-4 space-y-6 absolute inset-0 z-50 bg-dark">
         <div class="text-center">
             <h1 class="text-5xl md:text-7xl font-black uppercase tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-p1 via-white to-p2 drop-shadow-2xl">Brain Tug</h1>
-            <p class="text-gray-400 tracking-widest text-xs mt-1 uppercase">Arena Battle</p>
+            <p class="text-gray-400 tracking-widest text-xs mt-1 uppercase">Pro Edition</p>
         </div>
 
         <div class="glass p-1 rounded-xl flex gap-2">
-            <button onclick="setGameMode('math')" id="btn-mode-math" class="px-4 py-2 rounded-lg font-bold transition bg-p1 text-white shadow-lg"><i class="fas fa-calculator mr-2"></i>Math</button>
-            <button onclick="setGameMode('english')" id="btn-mode-eng" class="px-4 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white"><i class="fas fa-book mr-2"></i>Eng</button>
+            <button onclick="setGameMode('math')" id="btn-mode-math" class="px-4 py-2 rounded-lg font-bold transition bg-p1 text-white shadow-lg">
+                <i class="fas fa-calculator mr-2"></i> Math
+            </button>
+            <button onclick="setGameMode('english')" id="btn-mode-eng" class="px-4 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white">
+                <i class="fas fa-book mr-2"></i> Eng
+            </button>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg">
             <button onclick="setupQuickPlay()" class="glass p-6 rounded-xl hover:bg-white/5 transition border-l-4 border-accent">
                 <h3 class="text-xl font-bold text-white">Quick Play</h3>
-                <p class="text-gray-400 text-xs">1v1 Match</p>
+                <p class="text-gray-400 text-xs">1v1 Instant</p>
             </button>
             <button onclick="setupTournament()" class="glass p-6 rounded-xl hover:bg-white/5 transition border-l-4 border-purple-500">
                 <h3 class="text-xl font-bold text-white">Tournament</h3>
-                <p class="text-gray-400 text-xs">Bracket System</p>
+                <p class="text-gray-400 text-xs">Smart Bracket</p>
             </button>
         </div>
 
-        <button onclick="showHistory()" class="text-xs text-gray-500 hover:text-white underline mt-4">History</button>
+        <div class="flex flex-col items-center gap-2 mt-4">
+            <button onclick="showHistory()" class="text-xs text-gray-500 hover:text-white underline">View Tournament History</button>
+            <p class="text-xs text-gray-600 flex gap-4">
+                <span><i class="fas fa-mouse-pointer"></i> Touch</span>
+                <span><i class="fas fa-keyboard"></i> Keyboard</span>
+            </p>
+        </div>
     </div>
 
     <div id="screen-tourney-setup" class="screen hidden flex-col items-center h-full w-full p-4 absolute inset-0 z-50 bg-dark">
         <h2 class="text-2xl font-bold text-purple-400 mb-4">Setup</h2>
+        
         <div class="flex w-full max-w-md gap-2 mb-2">
-            <input id="tourney-input" type="text" placeholder="Name..." class="flex-1 bg-card border border-gray-600 p-3 rounded-xl outline-none focus:border-purple-500 text-white">
-            <button onclick="addPlayer()" class="px-4 bg-purple-600 rounded-xl font-bold text-lg"><i class="fas fa-plus"></i></button>
+            <input id="tourney-input" type="text" placeholder="Add Player..." class="flex-1 bg-card border border-gray-600 p-3 rounded-xl outline-none focus:border-purple-500 text-white">
+            <button onclick="addTourneyPlayer()" class="px-4 bg-purple-600 rounded-xl font-bold text-lg"><i class="fas fa-plus"></i></button>
         </div>
+        
         <div class="w-full max-w-md flex justify-between text-xs text-gray-400 mb-2 px-1">
             <span id="player-count">0 Players</span>
             <button onclick="clearPlayers()" class="text-red-400">Clear</button>
         </div>
+
         <ul id="player-list" class="w-full max-w-md flex-1 bg-card/50 rounded-xl p-2 overflow-y-auto mb-4 border border-gray-700 space-y-1"></ul>
+        
         <div class="flex gap-2 w-full max-w-md">
             <button onclick="showScreen('screen-menu')" class="px-4 py-3 glass rounded-xl font-bold">Back</button>
-            <button id="btn-generate" onclick="generateBracket()" class="flex-1 bg-accent text-dark font-bold rounded-xl hidden">START</button>
+            <button id="btn-generate" onclick="generateBracket()" class="flex-1 bg-accent text-dark font-bold rounded-xl hidden">START BRACKET</button>
         </div>
     </div>
 
     <div id="screen-tourney-hub" class="screen hidden flex-col h-full w-full p-2 absolute inset-0 z-50 bg-dark">
         <header class="flex justify-between items-center mb-2 bg-card p-3 rounded-xl">
-            <div><h2 class="text-lg font-bold text-white">Bracket</h2><p id="tourney-round-label" class="text-xs text-purple-400">ROUND 1</p></div>
+            <div>
+                <h2 class="text-lg font-bold text-white">Bracket</h2>
+                <p id="tourney-round-label" class="text-xs text-purple-400">ROUND 1</p>
+            </div>
             <button onclick="saveAndExit()" class="text-xs bg-gray-700 px-3 py-1 rounded border border-gray-600">Save</button>
         </header>
         <div class="flex-1 flex flex-col lg:flex-row gap-2 overflow-hidden">
@@ -152,6 +181,7 @@
     </div>
 
     <div id="screen-game" class="screen hidden h-full w-full flex-col relative bg-dark absolute inset-0 z-40">
+        
         <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none">
             <div id="timer-box" class="bg-black/80 px-3 py-1 rounded-full border border-gray-600 backdrop-blur shadow-xl transition-colors duration-300">
                 <span id="game-timer" class="text-2xl font-mono font-bold text-white">60</span>
@@ -162,7 +192,10 @@
             
             <div id="zone-p1" class="flex-1 border-b-2 lg:border-b-0 lg:border-r-2 border-gray-700/50 flex flex-col items-center justify-between p-2 relative mobile-rotate lg:rotate-0 transition-colors duration-300 overflow-hidden">
                 <div class="w-full flex justify-between items-center opacity-90 px-2 h-8 flex-shrink-0">
-                    <div><h3 id="p1-name" class="text-sm font-bold text-p1">P1</h3><div id="p1-combo" class="hidden text-yellow-400 text-[10px] font-bold animate-pulse">🔥 COMBO</div></div>
+                    <div>
+                        <h3 id="p1-name" class="text-sm font-bold text-p1">P1</h3>
+                        <div id="p1-combo" class="hidden text-yellow-400 text-[10px] font-bold animate-pulse">🔥 COMBO</div>
+                    </div>
                     <span id="p1-score" class="text-2xl font-black text-p1/50">0</span>
                 </div>
                 
@@ -188,12 +221,14 @@
                     <button onclick="tapClear('p1')" class="bg-red-900/50 rounded text-red-400 font-bold border-b-2 border-red-900 active:border-b-0 active:bg-red-800 col-span-2">CLR</button>
                 </div>
 
-                <div id="p1-frozen" class="absolute inset-0 bg-blue-500/20 backdrop-blur-sm hidden flex items-center justify-center z-30 rounded-lg"><i class="fas fa-snowflake text-4xl text-white animate-bounce"></i></div>
+                <div id="p1-frozen" class="absolute inset-0 bg-blue-500/20 backdrop-blur-sm hidden flex items-center justify-center z-30 rounded-lg">
+                    <i class="fas fa-snowflake text-4xl text-white animate-bounce"></i>
+                </div>
             </div>
 
-            <div class="absolute inset-x-0 top-1/2 h-1 lg:inset-y-0 lg:left-1/2 lg:w-1 bg-gray-600 z-0 flex items-center justify-center pointer-events-none">
+            <div id="rope-container" class="absolute inset-x-0 top-1/2 h-1 lg:inset-y-0 lg:left-1/2 lg:w-1 bg-gray-600 flex items-center justify-center">
                 <div class="absolute w-2 h-4 lg:w-4 lg:h-2 bg-gray-400 opacity-50"></div>
-                <div id="rope-marker" class="absolute w-10 h-10 lg:w-16 lg:h-16 bg-yellow-500 rounded-full border-4 border-gray-900 shadow-[0_0_20px_rgba(234,179,8,0.5)] z-20 flex items-center justify-center">
+                <div id="rope-marker" class="absolute w-10 h-10 lg:w-16 lg:h-16 bg-yellow-500 rounded-full border-4 border-gray-900 flex items-center justify-center">
                     <i class="fas fa-grip-lines lg:rotate-90 text-black/50 text-lg"></i>
                 </div>
             </div>
@@ -201,7 +236,10 @@
             <div id="zone-p2" class="flex-1 flex flex-col items-center justify-between p-2 relative transition-colors duration-300 overflow-hidden">
                 <div class="w-full flex justify-between items-center opacity-90 px-2 h-8 flex-shrink-0">
                     <span id="p2-score" class="text-2xl font-black text-p2/50">0</span>
-                    <div class="text-right"><h3 id="p2-name" class="text-sm font-bold text-p2 drop-shadow-md">P2</h3><div id="p2-combo" class="hidden text-yellow-400 text-[10px] font-bold animate-pulse">🔥 COMBO</div></div>
+                    <div class="text-right">
+                        <h3 id="p2-name" class="text-sm font-bold text-p2 drop-shadow-md">P2</h3>
+                        <div id="p2-combo" class="hidden text-yellow-400 text-[10px] font-bold animate-pulse">🔥 COMBO</div>
+                    </div>
                 </div>
 
                 <div class="flex-1 flex flex-col justify-center items-center w-full z-10 min-h-0">
@@ -247,6 +285,26 @@
             <div id="winner-name" class="text-5xl font-black text-yellow-400 mb-4 drop-shadow-md">PLAYER 1</div>
             <p id="winner-reason" class="text-white mb-8">Knockout!</p>
             <button id="btn-winner-continue" class="w-full py-3 bg-accent text-dark font-bold rounded-xl hover:bg-green-400">CONTINUE</button>
+        </div>
+    </div>
+
+    <div id="modal-teacher" class="fixed inset-0 z-[100] bg-black/95 hidden flex-col items-center justify-center p-4">
+        <div class="bg-card border border-gray-600 rounded-2xl p-6 max-w-2xl w-full h-[80vh] shadow-2xl flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-white"><i class="fas fa-chart-line"></i> Student Performance</h2>
+                <button onclick="hideTeacher()" class="text-gray-400 hover:text-white"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="overflow-y-auto flex-1 border border-gray-700 rounded-lg">
+                <table class="w-full text-left text-sm text-gray-300">
+                    <thead class="bg-gray-800 text-gray-400 sticky top-0">
+                        <tr><th class="p-3">Name</th><th class="p-3">Score</th><th class="p-3">Speed (ms)</th><th class="p-3">Count</th></tr>
+                    </thead>
+                    <tbody id="teacher-table-body" class="divide-y divide-gray-700"></tbody>
+                </table>
+            </div>
+            <div class="mt-4 flex justify-end gap-2">
+                <button onclick="clearStats()" class="text-red-400 text-xs hover:text-red-300">Reset Data</button>
+            </div>
         </div>
     </div>
 
