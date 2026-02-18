@@ -47,7 +47,7 @@
         html, body { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; overscroll-behavior: none; }
         body { touch-action: none; -webkit-user-select: none; user-select: none; }
         
-        /* Rope Logic: Ensure it stays on top */
+        /* Rope Logic */
         #rope-container { pointer-events: none; z-index: 0; }
         #rope-marker { 
             transition: transform 0.2s linear; 
@@ -58,8 +58,12 @@
         /* UI Styles */
         .glass { background: rgba(30, 41, 59, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
         
-        /* Admin Match Selection Hover Effect */
+        /* Match Card Hover for Admin Selection */
         .match-card:hover { border-color: #fbbf24; cursor: pointer; transform: scale(1.02); }
+
+        /* Teacher Table Sort Headers */
+        th.sortable { cursor: pointer; user-select: none; transition: color 0.2s; }
+        th.sortable:hover { color: #22c55e; }
 
         /* Mobile Specifics */
         @media (max-width: 1023px) { 
@@ -300,7 +304,12 @@
             <div class="overflow-y-auto flex-1 border border-gray-700 rounded-lg">
                 <table class="w-full text-left text-sm text-gray-300">
                     <thead class="bg-gray-800 text-gray-400 sticky top-0">
-                        <tr><th class="p-3">Name</th><th class="p-3">Score</th><th class="p-3">Acc %</th><th class="p-3">Rank</th></tr>
+                        <tr>
+                            <th class="p-3 sortable" onclick="sortTeacherTable('name')">Name <i class="fas fa-sort text-xs"></i></th>
+                            <th class="p-3 sortable" onclick="sortTeacherTable('score')">Score <i class="fas fa-sort text-xs"></i></th>
+                            <th class="p-3 sortable" onclick="sortTeacherTable('accuracy')">Acc % <i class="fas fa-sort text-xs"></i></th>
+                            <th class="p-3 sortable" onclick="sortTeacherTable('rating')">Rating <i class="fas fa-sort text-xs"></i></th>
+                        </tr>
                     </thead>
                     <tbody id="teacher-table-body" class="divide-y divide-gray-700"></tbody>
                 </table>
