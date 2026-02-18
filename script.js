@@ -12,15 +12,15 @@ const STATE = {
     activeMatch: 0, 
     activeTourneyId: null,
     history: JSON.parse(localStorage.getItem('brainTugHistory')) || [],
-    // Stats Format: { "Name": { correct: 10, wrong: 2, timeSum: 5000 } }
-    stats: JSON.parse(localStorage.getItem('brainTugStats')) || {}, 
+    stats: JSON.parse(localStorage.getItem('brainTugStats')) || {}, // { "Name": { correct: 10, wrong: 2, timeSum: 5000 } }
+    teacherSort: { key: 'rating', asc: false }, // Default sort for teacher dashboard
     game: {
         active: false, 
         difficulty: 1, 
         timer: 60, 
         interval: null, 
         tugValue: 50,      // 0 (P1 Win) -- 50 (Center) -- 100 (P2 Win)
-        suddenDeath: false, // Flag for tie-breaker mode
+        suddenDeath: false, 
         p1: { name:'', score:0, streak:0, frozen:false, processing:false, ans:'', q:null, wrongTime:[], startTime:0 },
         p2: { name:'', score:0, streak:0, frozen:false, processing:false, ans:'', q:null, wrongTime:[], startTime:0 }
     }
@@ -59,25 +59,7 @@ window.toggleMute = () => {
 };
 
 /* --- 4. TEACHER & STATS SYSTEM --- */
-// Calculates a skill rating based on Accuracy (High priority) and Speed (Low priority)
-// Prevents "spamming" from having a high rank.
-function getPlayerRating(name) {
-    const s = STATE.stats[name];
-    if(!s) return 0;
-    const total = s.correct + s.wrong;
-    if(total === 0) return 0;
-    
-    const accuracy = (s.correct / total) * 100; // 0 to 100
-    const avgTime = s.timeSum / total; // lower is better
-    
-    // Formula: Accuracy is main score. Speed acts as a tie-breaker.
-    // Base score = Accuracy * 1000. 
-    // Penalty = Average Time in ms.
-    // Example: 100% acc + 1000ms speed = 100000 - 1000 = 99000
-    // Example: 50% acc + 500ms speed = 50000 - 500 = 49500
-    return (accuracy * 1000) - avgTime;
-}
-
+// Update stats after every answer
 function updateStats(name, isCorrect, timeTaken) {
     if(!name || name.startsWith("Player")) return; // Don't track generics
     if(!STATE.stats[name]) STATE.stats[name] = { correct:0, wrong:0, timeSum:0 };
@@ -89,40 +71,24 @@ function updateStats(name, isCorrect, timeTaken) {
     localStorage.setItem('brainTugStats', JSON.stringify(STATE.stats));
 }
 
+// Calculate Rating: High Accuracy + Fast Speed = High Rating
+function getPlayerRating(name) {
+    const s = STATE.stats[name];
+    if(!s) return -9999;
+    const total = s.correct + s.wrong;
+    if(total === 0) return -9999;
+    
+    const accuracy = (s.correct / total) * 100; // 0-100
+    const avgTime = s.timeSum / total; // ms
+    
+    // Formula: Accuracy is king. Speed is the tie-breaker.
+    return (accuracy * 100) - (avgTime / 10); 
+}
+
 window.showTeacherLogin = () => {
     const pass = prompt("Enter Teacher Password:");
     if(pass === "admin") {
-        const tbody = get('teacher-table-body'); 
-        tbody.innerHTML = '';
-        
-        // Sort students by Rating (Performance)
-        const sortedNames = Object.keys(STATE.stats).sort((a,b) => getPlayerRating(b) - getPlayerRating(a));
-
-        if(sortedNames.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-gray-500">No data available.</td></tr>';
-        } else {
-            sortedNames.forEach((name, index) => {
-                const s = STATE.stats[name];
-                const total = s.correct + s.wrong;
-                const acc = total ? Math.round((s.correct / total) * 100) : 0;
-                const avgSpeed = total ? Math.round(s.timeSum / total) : 0;
-                
-                // Color code accuracy
-                let accColor = "text-red-400";
-                if(acc > 80) accColor = "text-green-400";
-                else if(acc > 50) accColor = "text-yellow-400";
-
-                tbody.innerHTML += `
-                    <tr class="border-b border-gray-700 hover:bg-white/5">
-                        <td class="p-3 font-bold text-white flex items-center gap-2">
-                            <span class="text-xs text-gray-500">#${index+1}</span> ${name}
-                        </td>
-                        <td class="p-3">${s.correct * 10}</td>
-                        <td class="p-3 ${accColor} font-bold">${acc}%</td>
-                        <td class="p-3 font-mono text-xs text-gray-400">${avgSpeed}ms</td>
-                    </tr>`;
-            });
-        }
+        renderTeacherTable();
         get('modal-teacher').classList.remove('hidden');
         get('modal-teacher').classList.add('flex');
     } else if(pass !== null) {
@@ -130,24 +96,80 @@ window.showTeacherLogin = () => {
     }
 };
 
+window.sortTeacherTable = (key) => {
+    // Toggle sort order if clicking same header, else default to Descending (High is better)
+    if(STATE.teacherSort.key === key) STATE.teacherSort.asc = !STATE.teacherSort.asc;
+    else { STATE.teacherSort.key = key; STATE.teacherSort.asc = false; }
+    
+    // Names usually sort Ascending A-Z first
+    if(key === 'name' && STATE.teacherSort.key !== key) STATE.teacherSort.asc = true;
+    
+    renderTeacherTable();
+};
+
+function renderTeacherTable() {
+    const tbody = get('teacher-table-body'); 
+    tbody.innerHTML = '';
+    const names = Object.keys(STATE.stats);
+
+    if(names.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-gray-500">No data available.</td></tr>';
+        return;
+    }
+
+    // Sorting Logic
+    names.sort((a, b) => {
+        let valA, valB;
+        const sA = STATE.stats[a], sB = STATE.stats[b];
+        const totA = sA.correct+sA.wrong, totB = sB.correct+sB.wrong;
+
+        switch(STATE.teacherSort.key) {
+            case 'name': valA = a.toLowerCase(); valB = b.toLowerCase(); break;
+            case 'score': valA = sA.correct * 10; valB = sB.correct * 10; break;
+            case 'accuracy': valA = totA ? (sA.correct/totA) : 0; valB = totB ? (sB.correct/totB) : 0; break;
+            case 'rating': valA = getPlayerRating(a); valB = getPlayerRating(b); break;
+        }
+
+        if(valA < valB) return STATE.teacherSort.asc ? -1 : 1;
+        if(valA > valB) return STATE.teacherSort.asc ? 1 : -1;
+        return 0;
+    });
+
+    names.forEach((name) => {
+        const s = STATE.stats[name];
+        const total = s.correct + s.wrong;
+        const acc = total ? Math.round((s.correct / total) * 100) : 0;
+        const rating = Math.round(getPlayerRating(name));
+        
+        // Color coding
+        let accColor = "text-red-400";
+        if(acc > 80) accColor = "text-green-400";
+        else if(acc > 50) accColor = "text-yellow-400";
+
+        tbody.innerHTML += `
+            <tr class="border-b border-gray-700 hover:bg-white/5">
+                <td class="p-3 font-bold text-white">${name}</td>
+                <td class="p-3 text-white">${s.correct * 10}</td>
+                <td class="p-3 ${accColor} font-bold">${acc}%</td>
+                <td class="p-3 font-mono text-xs text-gray-400">${rating > -9000 ? rating : '-'}</td>
+            </tr>`;
+    });
+}
+
 window.hideTeacher = () => { get('modal-teacher').classList.add('hidden'); get('modal-teacher').classList.remove('flex'); };
 window.clearStats = () => { 
     if(confirm("Reset ALL student performance data? This cannot be undone.")) { 
         STATE.stats={}; 
         localStorage.removeItem('brainTugStats'); 
-        window.hideTeacher(); 
+        renderTeacherTable();
     } 
 };
 
 /* --- 5. MENU & NAVIGATION --- */
 window.setGameMode = (m) => {
     STATE.mode = m;
-    get('btn-mode-math').className = m==='math' ? 
-        "px-4 py-2 rounded-lg font-bold transition bg-p1 text-white shadow-lg" : 
-        "px-4 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white";
-    get('btn-mode-eng').className = m==='english' ? 
-        "px-4 py-2 rounded-lg font-bold transition text-white shadow-lg bg-orange-600" : 
-        "px-4 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white";
+    get('btn-mode-math').className = m==='math' ? "px-4 py-2 rounded-lg font-bold transition bg-p1 text-white shadow-lg" : "px-4 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white";
+    get('btn-mode-eng').className = m==='english' ? "px-4 py-2 rounded-lg font-bold transition bg-orange-600 text-white shadow-lg" : "px-4 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white";
 };
 
 window.setupQuickPlay = () => { 
@@ -169,14 +191,14 @@ window.prepareGame = (p1Name, p2Name) => {
     STATE.game.active = false;
     STATE.game.timer = 60;
     STATE.game.tugValue = 50;
-    STATE.game.suddenDeath = false; // Reset sudden death flag
+    STATE.game.suddenDeath = false;
     
-    // Difficulty Scaling
+    // Difficulty Scaling based on Round
     let diff = 1; 
     if(STATE.type === 'tournament') {
         const remaining = STATE.bracket.length - STATE.activeRound;
-        if(remaining <= 2) diff = 3; 
-        else if(remaining <= 3) diff = 2; 
+        if(remaining <= 2) diff = 3; // Hard
+        else if(remaining <= 3) diff = 2; // Medium
     }
     STATE.game.difficulty = diff;
 
@@ -187,9 +209,8 @@ window.prepareGame = (p1Name, p2Name) => {
     updateTugVisuals();
     const tBox = get('timer-box');
     tBox.className = "bg-black/80 px-3 py-1 rounded-full border border-gray-600 backdrop-blur shadow-xl transition-colors duration-300";
-    const tText = get('game-timer');
-    tText.classList.remove('text-red-500');
-    tText.innerText = "60";
+    get('game-timer').classList.remove('text-red-500');
+    get('game-timer').innerText = "60";
 
     window.showScreen('screen-game');
     runCountdown();
@@ -205,7 +226,8 @@ function setupPlayer(key, name) {
     get(`${key}-input`).innerText = "";
     
     const fb = get(`${key}-feedback`);
-    fb.innerText = ""; fb.style.opacity = "0"; fb.className = "absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 font-bold text-4xl opacity-0 pointer-events-none z-50";
+    fb.innerText = ""; fb.style.opacity = "0"; 
+    fb.className = "absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 font-bold text-4xl opacity-0 pointer-events-none z-50";
 
     get(`${key}-frozen`).classList.add('hidden');
     get(`${key}-combo`).classList.add('hidden');
@@ -252,10 +274,10 @@ function startGame() {
 
 function gameTick() {
     STATE.game.timer--;
+    get('game-timer').innerText = STATE.game.timer;
     
     const tBox = get('timer-box');
     const tText = get('game-timer');
-    tText.innerText = STATE.game.timer;
 
     // Sudden Death UI
     if(STATE.game.suddenDeath) {
@@ -267,15 +289,16 @@ function gameTick() {
         tText.classList.add('text-red-500');
     }
 
+    // Ramping Difficulty
     if(!STATE.game.suddenDeath && STATE.game.timer % 15 === 0 && STATE.game.difficulty < 5) {
         STATE.game.difficulty++;
     }
 
     if(STATE.game.timer <= 0) {
         if(STATE.game.tugValue === 50) {
-            // TRIGGER SUDDEN DEATH (No Draws)
+            // TRIGGER SUDDEN DEATH
             STATE.game.suddenDeath = true;
-            STATE.game.timer = 999; // Infinite time
+            STATE.game.timer = 999; // Infinite
             
             // Visual Alert
             AUDIO.playSFX('sfx-wrong'); 
@@ -370,6 +393,7 @@ window.tapInput = (p, k) => handleInput(p, k);
 window.tapClear = (p) => clearInput(p);
 
 function handleInput(p, char) {
+    // Flag to prevent double submission
     if(STATE.game[p].frozen || STATE.game[p].processing) return;
     const q = STATE.game[p].q;
     if(!q) return;
@@ -410,7 +434,7 @@ function validate(p) {
             get(`${p}-combo`).classList.remove('hidden');
             get(`zone-${p}`).classList.add('border-yellow-400');
         }
-        // Rubber Banding
+        // Rubber Banding (Help loser)
         if(p==='p1' && STATE.game.tugValue > 80) power += 5;
         if(p==='p2' && STATE.game.tugValue < 20) power += 5;
 
@@ -428,12 +452,13 @@ function validate(p) {
         fb.style.opacity = "1";
         fb.className = "absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 font-bold text-4xl text-danger animate-shake pointer-events-none z-50";
         
-        moveTug(p === 'p1' ? 'p2' : 'p1', 4);
+        moveTug(p === 'p1' ? 'p2' : 'p1', 4); // Penalty
         
         const now = Date.now();
         STATE.game[p].wrongTime.push(now);
         if(STATE.game[p].wrongTime.length > 3) STATE.game[p].wrongTime.shift();
         
+        // Anti-Spam Freeze
         if(STATE.game[p].wrongTime.length === 3 && (now - STATE.game[p].wrongTime[0] < 3000)) {
             freezePlayer(p);
             STATE.game[p].wrongTime = [];
@@ -497,7 +522,7 @@ function endGame(winnerName) {
     if(winnerName === "TIME'S UP!") {
         if(STATE.game.tugValue < 50) winnerName = STATE.game.p1.name;
         else if(STATE.game.tugValue > 50) winnerName = STATE.game.p2.name;
-        else winnerName = "DRAW (Sudden Death Error)"; // Should not happen with sudden death
+        else winnerName = "DRAW - ERROR"; 
     }
 
     get('winner-name').innerText = winnerName;
@@ -524,17 +549,17 @@ function endGame(winnerName) {
     };
 }
 
-/* --- 10. TOURNAMENT ENGINE --- */
+/* --- 9. TOURNAMENT ENGINE --- */
 window.setupTournament = () => {
     STATE.type = 'tournament';
     
-    // Resume Active Match?
+    // 1. Resume Check
     let saved = null; try { saved = JSON.parse(localStorage.getItem('brainTugActive')); } catch(e) {}
     if(saved && confirm("Resume active tournament?")) { loadTournament(saved); return; }
 
-    // Reload Same Team?
+    // 2. Previous Players
     const prev = JSON.parse(localStorage.getItem('brainTugLastPlayers'));
-    if(prev && prev.length > 0 && confirm(`Reload same ${prev.length} students from last time?`)) {
+    if(prev && prev.length > 0 && confirm(`Reload ${prev.length} students from last session?`)) {
         STATE.players = prev;
     } else {
         STATE.players = [];
@@ -585,11 +610,10 @@ function updatePlayerList() {
 
 window.removePlayer = (i) => { STATE.players.splice(i,1); updatePlayerList(); };
 
-/* --- SMART SEEDING & BRACKET GEN --- */
+/* --- 10. BRACKET LOGIC --- */
 window.generateBracket = () => {
     let p = [...STATE.players];
-    
-    // Sort High Skill vs High Skill (based on saved performance rating)
+    // Smart Seed: Sort High Rank vs High Rank
     p.sort((a,b) => getPlayerRating(b) - getPlayerRating(a));
 
     const nextPow2 = Math.pow(2, Math.ceil(Math.log2(p.length)));
@@ -646,10 +670,7 @@ function findNextMatch() {
 }
 
 // ADMIN OVERRIDE
-window.setActiveMatch = (r, m) => {
-    STATE.activeRound = r; STATE.activeMatch = m;
-    renderBracket(); 
-};
+window.setActiveMatch = (r, m) => { STATE.activeRound = r; STATE.activeMatch = m; renderBracket(); }
 
 function renderBracket() {
     const c = get('bracket-container'); c.innerHTML = '';
@@ -663,10 +684,10 @@ function renderBracket() {
         
         round.forEach((m, mIdx) => {
             const active = (rIdx === STATE.activeRound && mIdx === STATE.activeMatch);
-            // Admin override click handler
+            // Allow Admin Click only on playable matches
             const isPlayable = !m.winner && m.p1 !== 'TBD' && m.p2 !== 'TBD';
             const clickAttr = isPlayable ? `onclick="setActiveMatch(${rIdx},${mIdx})"` : "";
-            const cursorClass = isPlayable ? "match-card" : ""; // Uses CSS class for hover
+            const cursorClass = isPlayable ? "match-card" : "";
 
             let sc = "border-gray-700 bg-gray-800/50 opacity-50"; 
             if(active) sc = "border-yellow-400 bg-gray-800 shadow-lg scale-105 border-l-4 opacity-100";
