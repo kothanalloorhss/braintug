@@ -1,301 +1,814 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Brain Tug: Tournament Edition</title>
-    
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
-    
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Brain Tug — Pro Arena</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+<style>
+:root {
+  --bg:       #050A18;
+  --surface:  #0D1527;
+  --card:     #111827;
+  --border:   rgba(255,255,255,0.06);
+  --p1:       #4F46E5;
+  --p1-glow:  rgba(79,70,229,0.4);
+  --p2:       #F59E0B;
+  --p2-glow:  rgba(245,158,11,0.4);
+  --green:    #10B981;
+  --red:      #EF4444;
+  --text:     #E2E8F0;
+  --muted:    #64748B;
+}
 
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        dark: '#0f172a',
-                        card: '#1e293b',
-                        p1: '#3b82f6', 
-                        p2: '#f97316', 
-                        accent: '#22c55e',
-                        danger: '#ef4444' 
-                    },
-                    animation: {
-                        'shake': 'shake 0.4s cubic-bezier(.36,.07,.19,.97) both',
-                        'pop': 'pop 0.2s ease-out',
-                        'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-                    },
-                    keyframes: {
-                        shake: {
-                            '10%, 90%': { transform: 'translate3d(-1px, 0, 0)' },
-                            '20%, 80%': { transform: 'translate3d(2px, 0, 0)' },
-                            '30%, 50%, 70%': { transform: 'translate3d(-4px, 0, 0)' },
-                            '40%, 60%': { transform: 'translate3d(4px, 0, 0)' }
-                        },
-                        pop: {
-                            '0%': { transform: 'scale(0.8)', opacity: '0' },
-                            '100%': { transform: 'scale(1)', opacity: '1' }
-                        }
-                    }
-                }
-            }
-        }
-    </script>
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;width:100%;overflow:hidden;overscroll-behavior:none;background:var(--bg);}
+body{font-family:'Inter',sans-serif;color:var(--text);touch-action:none;-webkit-user-select:none;user-select:none;}
 
-    <style>
-        /* Core Physics & Layout */
-        body { 
-            touch-action: none; /* Prevent scroll on mobile */
-            -webkit-user-select: none; user-select: none; /* No text select */
-            overflow: hidden; 
-        }
+/* ── DISPLAY FONT ── */
+.f-display{font-family:'Rajdhani',sans-serif;}
+.f-mono{font-family:'JetBrains Mono',monospace;}
 
-        /* Smooth Rope Movement */
-        #rope-marker { 
-            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); 
-            box-shadow: 0 0 30px rgba(234, 179, 8, 0.6);
-        }
+/* ── SCREENS ── */
+.screen{position:absolute;inset:0;z-index:40;}
+.screen.hidden{display:none!important;}
 
-        /* Glassmorphism */
-        .glass { 
-            background: rgba(30, 41, 59, 0.7); 
-            backdrop-filter: blur(10px); 
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
+/* ── ARENA GLOW BACKGROUND ── */
+.arena-bg{
+  background: radial-gradient(ellipse 60% 40% at 50% 100%, rgba(79,70,229,0.12) 0%, transparent 70%),
+              radial-gradient(ellipse 60% 40% at 50% 0%,   rgba(245,158,11,0.08) 0%, transparent 70%),
+              var(--bg);
+}
 
-        /* Mobile Compact Styles */
-        @media (max-width: 1023px) {
-            .mobile-rotate { transform: rotate(180deg); }
-            .compact-grid { gap: 4px; }
-            .compact-btn { padding: 10px; font-size: 1.2rem; }
-        }
-        
-        /* Camera Shake Class */
-        .camera-shake { animation: shake 0.5s ease-in-out; }
-    </style>
+/* ── GLASS CARD ── */
+.glass{
+  background:rgba(13,21,39,0.85);
+  backdrop-filter:blur(16px);
+  border:1px solid var(--border);
+}
+
+/* ── NEON BORDER ── */
+.neon-p1{border-color:var(--p1)!important;box-shadow:0 0 20px var(--p1-glow);}
+.neon-p2{border-color:var(--p2)!important;box-shadow:0 0 20px var(--p2-glow);}
+.neon-green{border-color:var(--green)!important;box-shadow:0 0 20px rgba(16,185,129,0.35);}
+
+/* ── GRID SCANLINES (arena aesthetic) ── */
+.scanlines::after{
+  content:'';position:absolute;inset:0;pointer-events:none;z-index:1;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.08) 2px,rgba(0,0,0,0.08) 4px);
+}
+
+/* ── SETUP WIZARD ── */
+#screen-setup{background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.kbd-slot{
+  width:140px;height:160px;border:2px dashed var(--muted);border-radius:16px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  transition:all .4s;position:relative;overflow:hidden;
+}
+.kbd-slot.connected{border-color:var(--green);background:rgba(16,185,129,0.08);border-style:solid;box-shadow:0 0 30px rgba(16,185,129,0.2);}
+.kbd-slot.waiting{border-color:var(--p1);border-style:solid;animation:pulse-border 1.5s infinite;}
+.kbd-slot.idle{opacity:0.35;}
+@keyframes pulse-border{0%,100%{box-shadow:0 0 0 rgba(79,70,229,0.4);}50%{box-shadow:0 0 20px rgba(79,70,229,0.6);}}
+.kbd-key{
+  width:38px;height:38px;border-radius:8px;background:var(--surface);border-bottom:3px solid rgba(0,0,0,0.5);
+  display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:14px;
+  transition:transform .15s,background .15s;
+}
+.kbd-key.active{background:var(--p1);transform:translateY(3px);border-bottom-width:0;}
+.kbd-key-amber.active{background:var(--p2);}
+
+/* ── HOME SCREEN ── */
+#screen-menu{display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.menu-btn{
+  position:relative;padding:20px 32px;border-radius:12px;font-family:'Rajdhani',sans-serif;
+  font-size:1.3rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  border:1px solid var(--border);background:var(--surface);
+  transition:all .25s;cursor:pointer;overflow:hidden;
+}
+.menu-btn::before{
+  content:'';position:absolute;inset:0;opacity:0;transition:opacity .25s;
+  background:linear-gradient(135deg,rgba(255,255,255,0.05),transparent);
+}
+.menu-btn:hover{transform:translateY(-2px);border-color:rgba(255,255,255,0.15);}
+.menu-btn:hover::before{opacity:1;}
+.menu-btn:active{transform:translateY(1px);}
+.menu-btn-battle{border-left:3px solid var(--p1);box-shadow:inset 0 0 30px rgba(79,70,229,0.05);}
+.menu-btn-battle:hover{box-shadow:0 8px 30px var(--p1-glow),inset 0 0 30px rgba(79,70,229,0.1);}
+.menu-btn-comp{border-left:3px solid var(--p2);box-shadow:inset 0 0 30px rgba(245,158,11,0.05);}
+.menu-btn-comp:hover{box-shadow:0 8px 30px var(--p2-glow),inset 0 0 30px rgba(245,158,11,0.1);}
+
+/* ── PLAYER NAME ENTRY ── */
+.name-input-wrap{position:relative;width:100%;}
+.name-input{
+  width:100%;padding:14px 16px;background:var(--surface);
+  border:1px solid var(--border);border-radius:10px;
+  font-family:'Rajdhani',sans-serif;font-size:1.4rem;font-weight:600;
+  color:var(--text);outline:none;letter-spacing:.04em;transition:border-color .2s,box-shadow .2s;
+}
+.name-input:focus{border-color:rgba(255,255,255,0.2);}
+.name-input.p1-active:focus{border-color:var(--p1);box-shadow:0 0 0 3px var(--p1-glow);}
+.name-input.p2-active:focus{border-color:var(--p2);box-shadow:0 0 0 3px var(--p2-glow);}
+.autocomplete-list{
+  position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:200;
+  background:var(--card);border:1px solid var(--border);border-radius:10px;
+  overflow:hidden;box-shadow:0 16px 40px rgba(0,0,0,0.6);display:none;max-height:220px;overflow-y:auto;
+}
+.autocomplete-list.open{display:block;}
+.ac-item{
+  padding:10px 16px;cursor:pointer;transition:background .15s;
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+}
+.ac-item:hover,.ac-item.focused{background:rgba(255,255,255,0.06);}
+.ac-name{font-family:'Rajdhani',sans-serif;font-weight:600;font-size:1.05rem;}
+.ac-meta{font-size:.72rem;color:var(--muted);font-family:'Inter',sans-serif;white-space:nowrap;}
+.ac-highlight{color:var(--green);}
+
+/* ── GAME SCREEN ── */
+#screen-game{display:flex;flex-direction:column;}
+.player-zone{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:space-between;
+  padding:12px;position:relative;overflow:hidden;transition:background .3s;
+}
+.zone-p1-bg{background:radial-gradient(ellipse 80% 60% at 50% 120%, rgba(79,70,229,0.08) 0%, transparent 70%);}
+.zone-p2-bg{background:radial-gradient(ellipse 80% 60% at 50% -20%, rgba(245,158,11,0.08) 0%, transparent 70%);}
+
+/* Divider */
+.rope-divider{
+  position:absolute;z-index:20;background:rgba(255,255,255,0.07);
+  display:flex;align-items:center;justify-content:center;
+}
+.rope-divider.h{left:0;right:0;top:50%;height:2px;transform:translateY(-50%);}
+.rope-divider.v{top:0;bottom:0;left:50%;width:2px;transform:translateX(-50%);}
+
+/* Rope Marker */
+#rope-marker{
+  position:absolute;z-index:30;
+  width:52px;height:52px;border-radius:50%;
+  background:conic-gradient(from 0deg,#F59E0B,#FCD34D,#F59E0B);
+  border:3px solid #0D1527;
+  box-shadow:0 0 0 3px rgba(245,158,11,0.3),0 0 30px rgba(245,158,11,0.5);
+  display:flex;align-items:center;justify-content:center;
+  transition:transform .15s linear;
+  transform:translate(-50%,-50%);
+  pointer-events:none;
+}
+#rope-marker .inner{
+  width:28px;height:28px;border-radius:50%;
+  background:var(--bg);border:2px solid rgba(255,255,255,0.15);
+  display:flex;align-items:center;justify-content:center;
+  font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--p2);font-weight:700;
+}
+
+/* Player Header */
+.player-hud{
+  width:100%;display:flex;align-items:center;gap:10px;padding:6px 8px;
+  background:rgba(0,0,0,0.3);border-radius:10px;border:1px solid var(--border);
+  flex-shrink:0;
+}
+.player-avatar{
+  width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-family:'Rajdhani',sans-serif;font-size:1.1rem;font-weight:700;flex-shrink:0;
+}
+.avatar-p1{background:rgba(79,70,229,0.2);border:1px solid rgba(79,70,229,0.4);color:#818CF8;}
+.avatar-p2{background:rgba(245,158,11,0.2);border:1px solid rgba(245,158,11,0.4);color:#FCD34D;}
+.player-name-tag{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:1rem;letter-spacing:.04em;flex:1;}
+.score-badge{
+  font-family:'JetBrains Mono',monospace;font-weight:700;font-size:1.5rem;
+  padding:2px 10px;border-radius:6px;background:rgba(0,0,0,0.4);border:1px solid var(--border);
+  min-width:48px;text-align:center;
+}
+.combo-tag{
+  font-family:'Rajdhani',sans-serif;font-size:.7rem;font-weight:700;letter-spacing:.1em;
+  padding:2px 6px;border-radius:4px;background:rgba(245,158,11,0.15);
+  border:1px solid rgba(245,158,11,0.3);color:#FCD34D;
+  display:none;
+}
+
+/* Question Area */
+.q-area{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  width:100%;z-index:10;padding:8px;min-height:0;
+}
+.q-text{
+  font-family:'Rajdhani',sans-serif;font-weight:700;font-size:2.8rem;
+  line-height:1.1;text-align:center;color:#fff;letter-spacing:.02em;
+}
+.q-answer{
+  font-family:'JetBrains Mono',monospace;font-weight:700;font-size:2.2rem;
+  min-height:44px;min-width:80px;text-align:center;
+  border-bottom:2px solid rgba(255,255,255,0.1);padding:4px 12px;
+  transition:border-color .2s;letter-spacing:.1em;
+}
+.q-answer.p1-color{color:#818CF8;}
+.q-answer.p2-color{color:#FCD34D;}
+
+/* Feedback Flash */
+.feedback-flash{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-family:'Rajdhani',sans-serif;font-size:2.5rem;font-weight:700;
+  pointer-events:none;opacity:0;z-index:50;
+  text-shadow:0 0 20px currentColor;white-space:nowrap;
+}
+
+/* Calculator */
+.calc-grid{
+  display:grid;grid-template-columns:repeat(6,1fr);gap:4px;
+  width:100%;max-width:340px;margin:0 auto;flex-shrink:0;
+  padding:4px;background:rgba(0,0,0,0.3);border-radius:12px;border:1px solid var(--border);
+}
+.c-btn{
+  height:40px;border-radius:8px;
+  font-family:'Rajdhani',sans-serif;font-size:1.2rem;font-weight:700;
+  background:var(--surface);border-bottom:3px solid rgba(0,0,0,0.5);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:background .1s,transform .1s,border-bottom-width .1s;
+  position:relative;user-select:none;-webkit-user-select:none;
+}
+.c-btn:active{transform:translateY(2px);border-bottom-width:0;}
+.c-btn-p1:active{background:var(--p1)!important;}
+.c-btn-p2:active{background:var(--p2)!important;}
+.c-btn-clr{background:rgba(239,68,68,0.12);color:#F87171;border-bottom-color:rgba(239,68,68,0.3);grid-column:span 2;}
+.c-btn-clr:active{background:var(--red)!important;color:#fff;}
+
+/* Freeze Overlay */
+.freeze-overlay{
+  position:absolute;inset:0;z-index:35;
+  background:rgba(96,165,250,0.1);backdrop-filter:blur(6px);
+  display:none;align-items:center;justify-content:center;border-radius:12px;
+}
+
+/* Timer */
+#timer-hub{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:25;
+  pointer-events:none;
+}
+.timer-pill{
+  background:rgba(5,10,24,0.9);border:1px solid var(--border);border-radius:100px;
+  padding:4px 18px;backdrop-filter:blur(12px);
+  font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:700;
+  color:#fff;letter-spacing:.05em;transition:border-color .3s,box-shadow .3s;
+  white-space:nowrap;display:flex;align-items:center;gap:8px;
+}
+.timer-pill.danger{border-color:var(--red);box-shadow:0 0 20px rgba(239,68,68,0.4);color:var(--red);}
+.timer-pill.sd{border-color:var(--red);box-shadow:0 0 30px rgba(239,68,68,0.6);animation:sd-pulse 0.8s infinite;}
+@keyframes sd-pulse{0%,100%{box-shadow:0 0 20px rgba(239,68,68,0.4);}50%{box-shadow:0 0 40px rgba(239,68,68,0.8);}}
+
+/* Tug Track */
+#tug-track{
+  position:absolute;z-index:22;pointer-events:none;
+}
+.tug-track.h{left:0;right:0;top:50%;height:40px;transform:translateY(-50%);display:flex;align-items:center;}
+.tug-track.v{top:0;bottom:0;left:50%;width:40px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;}
+.tug-bar-bg{position:absolute;background:rgba(255,255,255,0.04);border-radius:2px;}
+.tug-bar-p1{position:absolute;background:linear-gradient(90deg,rgba(79,70,229,0.5),transparent);border-radius:2px;}
+.tug-bar-p2{position:absolute;background:linear-gradient(-90deg,rgba(245,158,11,0.5),transparent);border-radius:2px;}
+
+/* Modal overlay */
+.modal-overlay{
+  position:fixed;inset:0;z-index:80;
+  background:rgba(0,0,0,0.85);backdrop-filter:blur(8px);
+  display:none;align-items:center;justify-content:center;padding:20px;
+}
+.modal-overlay.open{display:flex;}
+.modal-box{
+  background:var(--card);border:1px solid var(--border);border-radius:20px;
+  padding:32px;width:100%;max-width:420px;position:relative;
+  box-shadow:0 32px 80px rgba(0,0,0,0.8);
+}
+
+/* Countdown */
+#countdown-overlay{
+  position:fixed;inset:0;z-index:90;
+  background:rgba(0,0,0,0.95);
+  display:none;align-items:center;justify-content:center;flex-direction:column;
+}
+.countdown-num{
+  font-family:'Rajdhani',sans-serif;font-weight:700;font-size:12rem;line-height:1;
+  background:linear-gradient(135deg,#818CF8,#4F46E5);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.countdown-fight{
+  font-family:'Rajdhani',sans-serif;font-weight:700;font-size:6rem;
+  color:var(--red);text-shadow:0 0 40px rgba(239,68,68,0.6);letter-spacing:.1em;
+}
+
+/* Winner */
+#screen-winner{
+  position:fixed;inset:0;z-index:95;
+  background:rgba(0,0,0,0.97);
+  display:none;align-items:center;justify-content:center;flex-direction:column;
+}
+.winner-card{
+  background:linear-gradient(135deg,var(--card),var(--surface));
+  border:1px solid rgba(245,158,11,0.3);border-radius:24px;
+  padding:48px 40px;text-align:center;max-width:400px;width:100%;
+  box-shadow:0 0 60px rgba(245,158,11,0.1);
+  position:relative;overflow:hidden;
+}
+.winner-card::before{
+  content:'';position:absolute;top:-40px;left:50%;transform:translateX(-50%);
+  width:200px;height:200px;border-radius:50%;
+  background:radial-gradient(circle,rgba(245,158,11,0.15),transparent 70%);
+  pointer-events:none;
+}
+.winner-name{
+  font-family:'Rajdhani',sans-serif;font-weight:700;font-size:3.5rem;
+  color:#FCD34D;letter-spacing:.03em;line-height:1.1;
+}
+
+/* Tournament bracket */
+.bracket-match{
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;
+  transition:all .2s;cursor:default;
+}
+.bracket-match.active{border-color:var(--p2);box-shadow:0 0 20px var(--p2-glow);transform:scale(1.02);}
+.bracket-match.done{border-left:3px solid var(--green);opacity:.7;}
+.bracket-match.playable{cursor:pointer;}
+.bracket-match.playable:hover{border-color:rgba(255,255,255,0.2);}
+.bracket-player{font-family:'Rajdhani',sans-serif;font-size:1rem;font-weight:600;}
+.bracket-winner-text{color:var(--green);}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--muted);border-radius:2px;}
+
+/* Utility */
+.btn-primary{
+  padding:14px 28px;border-radius:10px;font-family:'Rajdhani',sans-serif;
+  font-size:1.1rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  background:linear-gradient(135deg,#4F46E5,#6366F1);color:#fff;border:none;cursor:pointer;
+  transition:all .2s;box-shadow:0 4px 20px var(--p1-glow);
+}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 30px var(--p1-glow);}
+.btn-primary:active{transform:translateY(1px);}
+.btn-secondary{
+  padding:12px 24px;border-radius:10px;font-family:'Rajdhani',sans-serif;
+  font-size:1rem;font-weight:600;background:var(--surface);
+  border:1px solid var(--border);color:var(--muted);cursor:pointer;transition:all .2s;
+}
+.btn-secondary:hover{color:var(--text);border-color:rgba(255,255,255,0.2);}
+
+/* English Options */
+.eng-opts{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;width:100%;max-width:220px;}
+.eng-opt{
+  padding:8px 4px;text-align:center;border-radius:8px;
+  background:var(--surface);border:1px solid var(--border);
+  font-family:'Rajdhani',sans-serif;font-size:.9rem;font-weight:600;
+  cursor:pointer;transition:all .15s;
+}
+.eng-opt:active{transform:scale(.95);}
+.eng-opt-p1:active{background:var(--p1);border-color:var(--p1);}
+.eng-opt-p2:active{background:var(--p2);border-color:var(--p2);}
+
+@media(min-width:1024px){
+  .q-text{font-size:4rem;}
+  .q-answer{font-size:2.8rem;}
+  .c-btn{height:48px;}
+}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(20px);}to{opacity:1;transform:translateY(0);}}
+.fade-in-up{animation:fadeInUp .4s ease both;}
+@keyframes pop{from{transform:scale(.85);opacity:0;}to{transform:scale(1);opacity:1;}}
+.pop{animation:pop .25s ease both;}
+@keyframes shake{10%,90%{transform:translate3d(-2px,0,0);}20%,80%{transform:translate3d(3px,0,0);}30%,50%,70%{transform:translate3d(-4px,0,0);}40%,60%{transform:translate3d(4px,0,0);}}
+.shake{animation:shake .4s cubic-bezier(.36,.07,.19,.97) both;}
+
+/* Tug divider line bars */
+.h-tug-p1-fill{height:4px;border-radius:2px;background:linear-gradient(90deg,rgba(79,70,229,0.6),transparent);transition:width .2s;}
+.h-tug-p2-fill{height:4px;border-radius:2px;background:linear-gradient(-90deg,rgba(245,158,11,0.6),transparent);transition:width .2s;}
+</style>
 </head>
-<body id="app-body" class="bg-dark text-white h-screen w-screen flex flex-col font-sans">
+<body class="arena-bg">
 
-    <audio id="bgm" loop><source src="assets/bgm.mp3" type="audio/mpeg"></audio>
-    <audio id="sfx-correct"><source src="assets/correct.mp3" type="audio/mpeg"></audio>
-    <audio id="sfx-wrong"><source src="assets/wrong.mp3" type="audio/mpeg"></audio>
-    <audio id="sfx-win"><source src="assets/win.mp3" type="audio/mpeg"></audio>
-    <audio id="sfx-countdown"><source src="assets/countdown.mp3" type="audio/mpeg"></audio>
+<!-- Audio -->
+<audio id="bgm" loop><source src="assets/bgm.mp3" type="audio/mpeg"></audio>
+<audio id="sfx-correct"><source src="assets/correct.mp3" type="audio/mpeg"></audio>
+<audio id="sfx-wrong"><source src="assets/wrong.mp3" type="audio/mpeg"></audio>
+<audio id="sfx-win"><source src="assets/win.mp3" type="audio/mpeg"></audio>
+<audio id="sfx-countdown"><source src="assets/count-down.mp3" type="audio/mpeg"></audio>
 
-    <button onclick="toggleMute()" class="fixed top-4 right-4 z-[100] glass p-3 rounded-full hover:bg-white/10 transition active:scale-95">
-        <i class="fas fa-volume-up text-white" id="icon-mute"></i>
+<!-- ─────────────────────────────────────────────
+     SCREEN 1: DAILY SETUP (Keyboard Connection)
+     ───────────────────────────────────────────── -->
+<div id="screen-setup" class="screen hidden">
+  <div class="fade-in-up text-center mb-10 px-4">
+    <div class="inline-flex items-center gap-2 px-4 py-1 rounded-full border border-white/10 bg-white/5 text-xs text-[var(--muted)] mb-6 f-display tracking-widest uppercase">
+      <i class="fas fa-circle text-[var(--green)] text-[8px]"></i> Daily Setup Required
+    </div>
+    <h1 class="f-display text-5xl font-bold text-white mb-2">Connect Keyboards</h1>
+    <p class="text-[var(--muted)] text-sm max-w-xs mx-auto">Each player needs a physical keyboard. Connect them one by one to continue.</p>
+  </div>
+
+  <!-- Keyboard Slots -->
+  <div class="flex gap-8 mb-10" id="kbd-slots-row">
+    <!-- Keyboard 1 -->
+    <div id="kbd-slot-1" class="kbd-slot waiting">
+      <div class="flex gap-2 mb-2">
+        <div class="kbd-key" id="k1-q">Q</div>
+        <div class="kbd-key" id="k1-w">W</div>
+        <div class="kbd-key" id="k1-e">E</div>
+      </div>
+      <div class="flex gap-2">
+        <div class="kbd-key" id="k1-a">A</div>
+        <div class="kbd-key" id="k1-s">S</div>
+        <div class="kbd-key" id="k1-d">D</div>
+      </div>
+      <div id="kbd1-label" class="f-display font-bold text-xs tracking-widest uppercase mt-3 text-[var(--p1)]">PRESS ANY KEY</div>
+      <div id="kbd1-status" class="text-[10px] text-[var(--muted)] mt-1">Player 1 Keyboard</div>
+    </div>
+
+    <!-- VS divider -->
+    <div class="flex flex-col items-center justify-center gap-2">
+      <div class="w-px h-16 bg-white/10"></div>
+      <span class="f-display text-[var(--muted)] font-bold text-xl">VS</span>
+      <div class="w-px h-16 bg-white/10"></div>
+    </div>
+
+    <!-- Keyboard 2 -->
+    <div id="kbd-slot-2" class="kbd-slot idle">
+      <div class="flex gap-2 mb-2">
+        <div class="kbd-key kbd-key-amber" id="k2-4">4</div>
+        <div class="kbd-key kbd-key-amber" id="k2-5">5</div>
+        <div class="kbd-key kbd-key-amber" id="k2-6">6</div>
+      </div>
+      <div class="flex gap-2">
+        <div class="kbd-key kbd-key-amber" id="k2-7">7</div>
+        <div class="kbd-key kbd-key-amber" id="k2-8">8</div>
+        <div class="kbd-key kbd-key-amber" id="k2-9">9</div>
+      </div>
+      <div id="kbd2-label" class="f-display font-bold text-xs tracking-widest uppercase mt-3 text-[var(--muted)]">WAITING…</div>
+      <div id="kbd2-status" class="text-[10px] text-[var(--muted)] mt-1">Player 2 Keyboard</div>
+    </div>
+  </div>
+
+  <!-- Progress Steps -->
+  <div id="setup-step-msg" class="text-center mb-8 min-h-[56px]">
+    <p class="text-white f-display text-xl font-bold" id="setup-step-title">Step 1 — Player 1 Keyboard</p>
+    <p class="text-[var(--muted)] text-sm mt-1" id="setup-step-sub">Press any key on the first keyboard to confirm connection</p>
+  </div>
+
+  <button id="btn-skip-setup" onclick="skipSetup()" class="btn-secondary text-xs">
+    Skip (Use Touchscreen Only)
+  </button>
+  <p class="text-[var(--muted)] text-[10px] mt-3 opacity-50">Setup runs once per day and remembers your configuration</p>
+</div>
+
+<!-- ─────────────────────────────────────────────
+     SCREEN 2: MAIN MENU
+     ───────────────────────────────────────────── -->
+<div id="screen-menu" class="screen hidden">
+  <!-- Top bar -->
+  <div class="absolute top-0 left-0 right-0 flex justify-between items-center px-4 py-3 z-10">
+    <button onclick="showTeacherLogin()" class="flex items-center gap-2 px-3 py-1.5 rounded-lg glass hover:bg-white/5 transition text-xs text-[var(--muted)] hover:text-white">
+      <i class="fas fa-chalkboard-teacher"></i> Teacher
     </button>
+    <button onclick="toggleMute()" class="w-8 h-8 rounded-lg glass flex items-center justify-center hover:bg-white/5 transition">
+      <i class="fas fa-volume-up text-[var(--muted)] text-sm" id="icon-mute"></i>
+    </button>
+  </div>
 
-    <div id="countdown-overlay" class="fixed inset-0 z-[90] bg-black/95 hidden flex-col items-center justify-center pointer-events-none">
-        <div id="countdown-text" class="text-9xl font-black text-yellow-400 animate-bounce">3</div>
+  <div class="flex flex-col items-center justify-center h-full px-6 gap-8">
+    <!-- Logo -->
+    <div class="text-center fade-in-up">
+      <div class="inline-flex items-center gap-3 mb-2">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] flex items-center justify-center">
+          <i class="fas fa-bolt text-white text-lg"></i>
+        </div>
+        <h1 class="f-display text-6xl font-bold text-white tracking-tight">BRAIN<span class="text-[#4F46E5]">TUG</span></h1>
+      </div>
+      <p class="text-[var(--muted)] f-display tracking-[.3em] text-xs uppercase">Pro Arena · 2025</p>
     </div>
 
-    <div id="screen-menu" class="screen flex flex-col items-center justify-center h-full w-full p-6 space-y-8 absolute inset-0 z-50 bg-dark">
-        <div class="text-center">
-            <h1 class="text-6xl md:text-8xl font-black uppercase tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-p1 via-white to-p2 drop-shadow-2xl">
-                Brain Tug
-            </h1>
-            <p class="text-gray-400 tracking-widest text-sm mt-2 uppercase">Arena Battle System</p>
-        </div>
-
-        <div class="glass p-2 rounded-xl flex gap-4">
-            <button onclick="setGameMode('math')" id="btn-mode-math" class="px-6 py-2 rounded-lg font-bold transition bg-p1 text-white shadow-lg ring-2 ring-blue-400">
-                <i class="fas fa-calculator mr-2"></i>Math
-            </button>
-            <button onclick="setGameMode('english')" id="btn-mode-eng" class="px-6 py-2 rounded-lg font-bold transition text-gray-400 hover:text-white">
-                <i class="fas fa-book mr-2"></i>English
-            </button>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl">
-            <button onclick="setupQuickPlay()" class="glass p-8 rounded-2xl hover:bg-white/5 transition group border-l-4 border-accent">
-                <h3 class="text-2xl font-bold text-white group-hover:scale-105 transition">Quick Play</h3>
-                <p class="text-gray-400 text-sm mt-1">Instant 1v1 Match</p>
-            </button>
-            <button onclick="setupTournament()" class="glass p-8 rounded-2xl hover:bg-white/5 transition group border-l-4 border-purple-500">
-                <h3 class="text-2xl font-bold text-white group-hover:scale-105 transition">Tournament</h3>
-                <p class="text-gray-400 text-sm mt-1">Bracket System (Max 64)</p>
-            </button>
-        </div>
-
-        <div class="flex flex-col items-center gap-2 mt-4">
-            <button onclick="showHistory()" class="text-xs text-gray-500 hover:text-white underline">View Tournament History</button>
-            <p class="text-xs text-gray-600">
-                <span class="hidden lg:inline"><i class="fas fa-keyboard"></i> PC: Top Row vs Numpad</span>
-                <span class="lg:hidden"><i class="fas fa-mobile-alt"></i> Mobile: Tabletop Mode</span>
-            </p>
-        </div>
+    <!-- Mode toggle -->
+    <div class="flex gap-1 p-1 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
+      <button onclick="setGameMode('math')" id="btn-mode-math" class="px-5 py-2 rounded-lg f-display font-bold text-sm tracking-wide transition">
+        <i class="fas fa-calculator mr-2"></i>MATH
+      </button>
+      <button onclick="setGameMode('english')" id="btn-mode-eng" class="px-5 py-2 rounded-lg f-display font-bold text-sm tracking-wide transition text-[var(--muted)]">
+        <i class="fas fa-book mr-2"></i>ENGLISH
+      </button>
     </div>
 
-    <div id="screen-tourney-setup" class="screen hidden flex-col items-center h-full w-full p-6 absolute inset-0 z-50 bg-dark">
-        <h2 class="text-3xl font-bold text-purple-400 mb-6">New Tournament</h2>
-        
-        <div class="flex w-full max-w-lg gap-2 mb-2">
-            <input id="tourney-input" type="text" placeholder="Enter Player Name..." class="flex-1 bg-card border border-gray-600 p-4 rounded-xl outline-none focus:border-purple-500 text-white placeholder-gray-500">
-            <button onclick="addPlayer()" class="px-6 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold text-xl shadow-lg"><i class="fas fa-plus"></i></button>
-        </div>
-
-        <div class="w-full max-w-lg flex justify-between items-center mb-4 px-1">
-            <span id="player-count" class="text-sm text-gray-400 font-mono">0 Players</span>
-            <button onclick="clearPlayers()" class="text-red-400 text-sm hover:text-red-300">Clear All</button>
-        </div>
-
-        <ul id="player-list" class="w-full max-w-lg flex-1 bg-card/50 rounded-xl p-4 overflow-y-auto mb-6 border border-gray-700 space-y-2">
-            </ul>
-
-        <div class="flex gap-4 w-full max-w-lg">
-            <button onclick="showScreen('screen-menu')" class="px-6 py-4 glass rounded-xl font-bold hover:bg-white/10">Back</button>
-            <button id="btn-generate" onclick="generateBracket()" class="flex-1 bg-accent hover:bg-green-500 text-dark font-bold rounded-xl shadow-lg hidden">GENERATE BRACKET</button>
-        </div>
+    <!-- Main Buttons -->
+    <div class="flex flex-col gap-3 w-full max-w-xs">
+      <button onclick="setupBattleMode()" class="menu-btn menu-btn-battle fade-in-up" style="animation-delay:.05s">
+        <i class="fas fa-sword mr-3 text-[#818CF8]"></i>Battle Mode
+        <span class="block text-xs font-normal text-[var(--muted)] mt-0.5 normal-case tracking-normal">1v1 Quick Match · All Players</span>
+      </button>
+      <button onclick="startCompetitionSetup()" class="menu-btn menu-btn-comp fade-in-up" style="animation-delay:.1s">
+        <i class="fas fa-trophy mr-3 text-[#FCD34D]"></i>Competition Mode
+        <span class="block text-xs font-normal text-[var(--muted)] mt-0.5 normal-case tracking-normal">Bracket Tournament · Admin Only</span>
+      </button>
     </div>
 
-    <div id="screen-tourney-hub" class="screen hidden flex-col h-full w-full p-4 absolute inset-0 z-50 bg-dark">
-        <header class="flex justify-between items-center mb-4 bg-card p-4 rounded-xl shadow-lg">
-            <div>
-                <h2 class="text-xl font-bold text-white">🏆 Tournament Bracket</h2>
-                <p id="tourney-round-label" class="text-xs text-purple-400 font-mono mt-1">ROUND 1</p>
-            </div>
-            <button onclick="saveAndExit()" class="text-xs bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg border border-gray-600">Save & Exit</button>
-        </header>
+    <!-- Bottom links -->
+    <div class="flex items-center gap-4 text-xs text-[var(--muted)]">
+      <button onclick="showHistory()" class="hover:text-white transition flex items-center gap-1.5">
+        <i class="fas fa-clock-rotate-left text-[10px]"></i>History
+      </button>
+      <span class="text-white/10">|</span>
+      <button onclick="runSetup(true)" class="hover:text-white transition flex items-center gap-1.5">
+        <i class="fas fa-keyboard text-[10px]"></i>Re-run Setup
+      </button>
+    </div>
+  </div>
+</div>
 
-        <div class="flex-1 flex flex-col lg:flex-row gap-4 overflow-hidden">
-            <div id="bracket-container" class="flex-1 bg-card/30 rounded-xl p-4 overflow-y-auto border border-gray-700/50">
-                </div>
+<!-- ─────────────────────────────────────────────
+     SCREEN 3: BATTLE NAME ENTRY
+     ───────────────────────────────────────────── -->
+<div id="screen-battle-entry" class="screen hidden">
+  <div class="flex flex-col items-center justify-center h-full px-6 gap-6">
 
-            <div class="h-1/3 lg:h-auto lg:w-96 flex flex-col gap-4">
-                <div class="bg-card p-6 rounded-xl border border-gray-700 flex-1 flex flex-col justify-center text-center shadow-xl">
-                    <div id="match-card-content">
-                        </div>
-                </div>
-            </div>
-        </div>
+    <div class="text-center fade-in-up">
+      <h2 class="f-display text-4xl font-bold text-white">Challengers</h2>
+      <p class="text-[var(--muted)] text-sm mt-1">Enter your name to find your profile</p>
     </div>
 
-    <div id="screen-history" class="screen hidden flex-col items-center justify-center h-full w-full p-8 absolute inset-0 z-[60] bg-dark/95 backdrop-blur">
-        <div class="w-full max-w-2xl bg-card border border-gray-600 rounded-2xl p-6 shadow-2xl flex flex-col max-h-[80vh]">
-            <h2 class="text-2xl font-bold mb-4">Past Tournaments</h2>
-            <div id="history-list" class="flex-1 overflow-y-auto space-y-2 pr-2">
-                </div>
-            <div class="mt-6 flex justify-end gap-4">
-                <button onclick="clearHistory()" class="text-red-400 text-sm">Clear History</button>
-                <button onclick="showScreen('screen-menu')" class="bg-white text-dark font-bold px-6 py-2 rounded-lg">Close</button>
-            </div>
+    <div class="w-full max-w-sm flex flex-col gap-5 fade-in-up" style="animation-delay:.08s">
+      <!-- P1 -->
+      <div>
+        <div class="flex items-center gap-2 mb-2">
+          <div class="w-6 h-6 rounded bg-[var(--p1)]/20 border border-[var(--p1)]/40 flex items-center justify-center">
+            <i class="fas fa-gamepad text-[#818CF8] text-xs"></i>
+          </div>
+          <span class="f-display font-bold text-sm text-[#818CF8] uppercase tracking-wide">Player 1</span>
+          <span class="text-[var(--muted)] text-xs">(Left keyboard)</span>
         </div>
+        <div class="name-input-wrap">
+          <input id="p1-name-input" class="name-input p1-active" placeholder="Type name…" autocomplete="off" oninput="onNameInput('p1')" onkeydown="onNameKeydown(event,'p1')">
+          <div id="p1-ac-list" class="autocomplete-list"></div>
+        </div>
+        <div id="p1-selected-card" class="hidden mt-2 p-3 rounded-lg bg-[var(--surface)] border border-[var(--p1)]/30 flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-[var(--p1)]/20 flex items-center justify-center text-[#818CF8] font-bold f-display" id="p1-sc-init"></div>
+          <div>
+            <div class="f-display font-bold text-white text-base" id="p1-sc-name"></div>
+            <div class="text-xs text-[var(--muted)]" id="p1-sc-meta"></div>
+          </div>
+          <button onclick="clearPlayerSelection('p1')" class="ml-auto text-[var(--muted)] hover:text-white transition"><i class="fas fa-times text-xs"></i></button>
+        </div>
+      </div>
+
+      <!-- P2 -->
+      <div>
+        <div class="flex items-center gap-2 mb-2">
+          <div class="w-6 h-6 rounded bg-[var(--p2)]/20 border border-[var(--p2)]/40 flex items-center justify-center">
+            <i class="fas fa-gamepad text-[#FCD34D] text-xs"></i>
+          </div>
+          <span class="f-display font-bold text-sm text-[#FCD34D] uppercase tracking-wide">Player 2</span>
+          <span class="text-[var(--muted)] text-xs">(Right keyboard)</span>
+        </div>
+        <div class="name-input-wrap">
+          <input id="p2-name-input" class="name-input p2-active" placeholder="Type name…" autocomplete="off" oninput="onNameInput('p2')" onkeydown="onNameKeydown(event,'p2')">
+          <div id="p2-ac-list" class="autocomplete-list"></div>
+        </div>
+        <div id="p2-selected-card" class="hidden mt-2 p-3 rounded-lg bg-[var(--surface)] border border-[var(--p2)]/30 flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-[var(--p2)]/20 flex items-center justify-center text-[#FCD34D] font-bold f-display" id="p2-sc-init"></div>
+          <div>
+            <div class="f-display font-bold text-white text-base" id="p2-sc-name"></div>
+            <div class="text-xs text-[var(--muted)]" id="p2-sc-meta"></div>
+          </div>
+          <button onclick="clearPlayerSelection('p2')" class="ml-auto text-[var(--muted)] hover:text-white transition"><i class="fas fa-times text-xs"></i></button>
+        </div>
+      </div>
     </div>
 
-    <div id="screen-game" class="screen hidden h-full w-full flex-col relative bg-dark absolute inset-0 z-40">
-        
-        <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none">
-            <div id="timer-box" class="bg-black/80 px-4 py-2 rounded-full border border-gray-600 backdrop-blur shadow-xl transition-colors duration-300">
-                <span id="game-timer" class="text-3xl font-mono font-bold text-white">60</span>
-            </div>
-        </div>
+    <div class="flex gap-3 w-full max-w-sm">
+      <button onclick="showScreen('screen-menu')" class="btn-secondary flex-shrink-0"><i class="fas fa-arrow-left"></i></button>
+      <button id="btn-start-battle" onclick="startBattleGame()" class="btn-primary flex-1" disabled>
+        <i class="fas fa-bolt mr-2"></i>FIGHT!
+      </button>
+    </div>
+  </div>
+</div>
 
-        <div class="flex-1 flex flex-col lg:flex-row relative h-full">
-            
-            <div id="zone-p1" class="flex-1 border-b-2 lg:border-b-0 lg:border-r-2 border-gray-700/50 flex flex-col items-center justify-between p-4 relative mobile-rotate lg:rotate-0 transition-colors duration-300">
-                
-                <div class="w-full flex justify-between items-center opacity-90">
-                    <div>
-                        <h3 id="p1-name" class="text-xl font-bold text-p1 drop-shadow-md">Player 1</h3>
-                        <div id="p1-combo" class="hidden text-yellow-400 text-xs font-bold animate-pulse"><i class="fas fa-fire"></i> STREAK!</div>
-                    </div>
-                    <span id="p1-score" class="text-4xl font-black text-p1/50">0</span>
-                </div>
+<!-- ─────────────────────────────────────────────
+     SCREEN 4: GAME ARENA
+     ───────────────────────────────────────────── -->
+<div id="screen-game" class="screen hidden">
 
-                <div class="flex-1 flex flex-col justify-center items-center w-full z-10">
-                    <div id="p1-q-text" class="text-5xl lg:text-6xl font-black text-white mb-4 drop-shadow-lg text-center">...</div>
-                    <div id="p1-q-opts" class="grid grid-cols-3 gap-2 w-full max-w-xs mb-2 hidden"></div>
-                    <div id="p1-input" class="text-6xl font-mono text-p1 border-b-4 border-gray-600 min-h-[70px] min-w-[120px] text-center transition-all"></div>
-                    <div id="p1-feedback" class="h-8 mt-2 font-bold text-xl tracking-wider"></div>
-                </div>
+  <!-- Timer hub (center) -->
+  <div id="timer-hub">
+    <div class="timer-pill" id="timer-pill">
+      <span id="game-timer" class="f-mono">60</span>
+    </div>
+  </div>
 
-                <div class="lg:hidden w-full max-w-sm grid grid-cols-3 compact-grid mx-auto z-20">
-                    <button onclick="tapInput('p1', '1')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p1 active:text-white shadow">1</button>
-                    <button onclick="tapInput('p1', '2')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p1 active:text-white shadow">2</button>
-                    <button onclick="tapInput('p1', '3')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p1 active:text-white shadow">3</button>
-                    <button onclick="tapInput('p1', '4')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p1 active:text-white shadow">4</button>
-                    <button onclick="tapInput('p1', '5')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p1 active:text-white shadow">5</button>
-                    <button onclick="tapInput('p1', '6')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p1 active:text-white shadow">6</button>
-                    <button onclick="tapInput('p1', '7')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p1 active:text-white shadow">7</button>
-                    <button onclick="tapInput('p1', '8')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p1 active:text-white shadow">8</button>
-                    <button onclick="tapInput('p1', '9')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p1 active:text-white shadow">9</button>
-                    <button onclick="tapClear('p1')" class="bg-red-900/50 compact-btn rounded font-bold border border-red-900 text-red-400">C</button>
-                    <button onclick="tapInput('p1', '0')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p1 active:text-white shadow">0</button>
-                </div>
+  <!-- Rope system (rendered via JS) -->
+  <div id="rope-area" class="absolute inset-0 pointer-events-none z-20">
+    <div id="rope-divider" class="rope-divider"></div>
+    <div id="rope-marker">
+      <div class="inner" id="rope-pct">50</div>
+    </div>
+  </div>
 
-                <div id="p1-frozen" class="absolute inset-0 bg-blue-500/20 backdrop-blur-sm hidden flex items-center justify-center z-30 rounded-lg">
-                    <i class="fas fa-snowflake text-6xl text-white animate-bounce"></i>
-                </div>
-            </div>
-
-            <div class="absolute inset-x-0 top-1/2 h-1 lg:inset-y-0 lg:left-1/2 lg:w-1 bg-gray-600 z-0 flex items-center justify-center">
-                <div class="absolute w-2 h-4 lg:w-4 lg:h-2 bg-gray-400 opacity-50"></div>
-                <div id="rope-marker" class="absolute w-12 h-12 lg:w-16 lg:h-16 bg-yellow-500 rounded-full border-4 border-gray-900 shadow-[0_0_20px_rgba(234,179,8,0.5)] z-20 flex items-center justify-center">
-                    <i class="fas fa-grip-lines lg:rotate-90 text-black/50 text-xl"></i>
-                </div>
-            </div>
-
-            <div id="zone-p2" class="flex-1 flex flex-col items-center justify-between p-4 relative transition-colors duration-300">
-                
-                <div class="w-full flex justify-between items-center opacity-90">
-                    <span id="p2-score" class="text-4xl font-black text-p2/50">0</span>
-                    <div class="text-right">
-                        <h3 id="p2-name" class="text-xl font-bold text-p2 drop-shadow-md">Player 2</h3>
-                        <div id="p2-combo" class="hidden text-yellow-400 text-xs font-bold animate-pulse">STREAK! <i class="fas fa-fire"></i></div>
-                    </div>
-                </div>
-
-                <div class="flex-1 flex flex-col justify-center items-center w-full z-10">
-                    <div id="p2-q-text" class="text-5xl lg:text-6xl font-black text-white mb-4 drop-shadow-lg text-center">...</div>
-                    <div id="p2-q-opts" class="grid grid-cols-3 gap-2 w-full max-w-xs mb-2 hidden"></div>
-                    <div id="p2-input" class="text-6xl font-mono text-p2 border-b-4 border-gray-600 min-h-[70px] min-w-[120px] text-center transition-all"></div>
-                    <div id="p2-feedback" class="h-8 mt-2 font-bold text-xl tracking-wider"></div>
-                </div>
-
-                <div class="lg:hidden w-full max-w-sm grid grid-cols-3 compact-grid mx-auto z-20">
-                    <button onclick="tapInput('p2', '1')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p2 active:text-white shadow">1</button>
-                    <button onclick="tapInput('p2', '2')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p2 active:text-white shadow">2</button>
-                    <button onclick="tapInput('p2', '3')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p2 active:text-white shadow">3</button>
-                    <button onclick="tapInput('p2', '4')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p2 active:text-white shadow">4</button>
-                    <button onclick="tapInput('p2', '5')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p2 active:text-white shadow">5</button>
-                    <button onclick="tapInput('p2', '6')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p2 active:text-white shadow">6</button>
-                    <button onclick="tapInput('p2', '7')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p2 active:text-white shadow">7</button>
-                    <button onclick="tapInput('p2', '8')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p2 active:text-white shadow">8</button>
-                    <button onclick="tapInput('p2', '9')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p2 active:text-white shadow">9</button>
-                    <button onclick="tapClear('p2')" class="bg-red-900/50 compact-btn rounded font-bold border border-red-900 text-red-400">C</button>
-                    <button onclick="tapInput('p2', '0')" class="bg-card compact-btn rounded font-bold border border-gray-700 active:bg-p2 active:text-white shadow">0</button>
-                </div>
-
-                <div id="p2-frozen" class="absolute inset-0 bg-blue-500/20 backdrop-blur-sm hidden flex items-center justify-center z-30 rounded-lg">
-                    <i class="fas fa-snowflake text-6xl text-white animate-bounce"></i>
-                </div>
-            </div>
-        </div>
+  <!-- P1 Zone (top half on mobile, left on desktop) -->
+  <div id="zone-p1" class="player-zone zone-p1-bg" style="position:absolute;top:0;left:0;right:0;bottom:50%;">
+    <!-- Rotated for player on opposite side on mobile -->
+    <div class="player-hud">
+      <div class="player-avatar avatar-p1" id="p1-avatar-txt">P1</div>
+      <div>
+        <div class="player-name-tag text-[#818CF8]" id="p1-name">P1</div>
+        <div class="combo-tag" id="p1-combo">🔥 COMBO</div>
+      </div>
+      <div class="score-badge text-[#818CF8] ml-auto" id="p1-score">0</div>
     </div>
 
-    <div id="modal-quick-setup" class="screen hidden fixed inset-0 z-[80] bg-black/90 flex items-center justify-center p-4">
-        <div class="bg-card border border-gray-600 rounded-2xl p-8 max-w-sm w-full shadow-2xl relative">
-            <button onclick="showScreen('screen-menu')" class="absolute top-4 right-4 text-gray-500 hover:text-white"><i class="fas fa-times"></i></button>
-            <h2 class="text-2xl font-bold mb-6 text-center text-white">Challengers</h2>
-            <input id="qp-p1" type="text" placeholder="Player 1 (Blue)" class="w-full bg-dark border border-gray-600 p-3 rounded mb-4 text-p1 font-bold focus:border-p1 outline-none">
-            <input id="qp-p2" type="text" placeholder="Player 2 (Orange)" class="w-full bg-dark border border-gray-600 p-3 rounded mb-6 text-p2 font-bold focus:border-p2 outline-none">
-            <button onclick="startQuickGameFromModal()" class="w-full py-4 bg-accent text-dark font-bold rounded-xl shadow-lg hover:scale-105 transition">FIGHT!</button>
-        </div>
+    <div class="q-area">
+      <div class="q-text" id="p1-q-text">…</div>
+      <div id="p1-eng-opts" class="eng-opts my-2 hidden"></div>
+      <div class="q-answer p1-color" id="p1-input"></div>
     </div>
 
-    <div id="modal-winner" class="fixed inset-0 z-[100] bg-black/95 hidden flex-col items-center justify-center p-6 text-center">
-        <div class="bg-card border border-yellow-500/50 p-8 rounded-3xl shadow-2xl max-w-md w-full animate-pop">
-            <h2 class="text-gray-400 uppercase tracking-widest text-sm mb-2">Winner</h2>
-            <div id="winner-name" class="text-5xl font-black text-yellow-400 mb-4 drop-shadow-md">PLAYER 1</div>
-            <p id="winner-reason" class="text-white mb-8">Victory by knockout!</p>
-            <button id="btn-winner-continue" class="w-full py-4 bg-accent text-dark font-bold rounded-xl hover:bg-green-400 transition">CONTINUE</button>
-        </div>
+    <div class="feedback-flash text-[var(--green)]" id="p1-feedback"></div>
+
+    <div class="calc-grid">
+      <button class="c-btn c-btn-p1" ontouchstart="tapInput('p1','1')" onclick="tapInput('p1','1')">1</button>
+      <button class="c-btn c-btn-p1" ontouchstart="tapInput('p1','2')" onclick="tapInput('p1','2')">2</button>
+      <button class="c-btn c-btn-p1" ontouchstart="tapInput('p1','3')" onclick="tapInput('p1','3')">3</button>
+      <button class="c-btn c-btn-p1" ontouchstart="tapInput('p1','4')" onclick="tapInput('p1','4')">4</button>
+      <button class="c-btn c-btn-p1" ontouchstart="tapInput('p1','5')" onclick="tapInput('p1','5')">5</button>
+      <button class="c-btn c-btn-p1" ontouchstart="tapInput('p1','6')" onclick="tapInput('p1','6')">6</button>
+      <button class="c-btn c-btn-p1" ontouchstart="tapInput('p1','7')" onclick="tapInput('p1','7')">7</button>
+      <button class="c-btn c-btn-p1" ontouchstart="tapInput('p1','8')" onclick="tapInput('p1','8')">8</button>
+      <button class="c-btn c-btn-p1" ontouchstart="tapInput('p1','9')" onclick="tapInput('p1','9')">9</button>
+      <button class="c-btn c-btn-p1" ontouchstart="tapInput('p1','0')" onclick="tapInput('p1','0')">0</button>
+      <button class="c-btn c-btn-clr" ontouchstart="tapClear('p1')" onclick="tapClear('p1')">CLR</button>
     </div>
 
-    <script src="script.js"></script>
+    <div class="freeze-overlay" id="p1-frozen">
+      <i class="fas fa-snowflake text-5xl text-blue-300 animate-spin" style="animation-duration:3s"></i>
+    </div>
+  </div>
+
+  <!-- P2 Zone (bottom half on mobile, right on desktop) -->
+  <div id="zone-p2" class="player-zone zone-p2-bg" style="position:absolute;top:50%;left:0;right:0;bottom:0;">
+    <div class="player-hud">
+      <div class="score-badge text-[#FCD34D]" id="p2-score">0</div>
+      <div class="ml-auto text-right">
+        <div class="player-name-tag text-[#FCD34D]" id="p2-name">P2</div>
+        <div class="combo-tag" id="p2-combo">🔥 COMBO</div>
+      </div>
+      <div class="player-avatar avatar-p2" id="p2-avatar-txt">P2</div>
+    </div>
+
+    <div class="q-area">
+      <div class="q-text" id="p2-q-text">…</div>
+      <div id="p2-eng-opts" class="eng-opts my-2 hidden"></div>
+      <div class="q-answer p2-color" id="p2-input"></div>
+    </div>
+
+    <div class="feedback-flash text-[var(--green)]" id="p2-feedback"></div>
+
+    <div class="calc-grid">
+      <button class="c-btn c-btn-p2" ontouchstart="tapInput('p2','1')" onclick="tapInput('p2','1')">1</button>
+      <button class="c-btn c-btn-p2" ontouchstart="tapInput('p2','2')" onclick="tapInput('p2','2')">2</button>
+      <button class="c-btn c-btn-p2" ontouchstart="tapInput('p2','3')" onclick="tapInput('p2','3')">3</button>
+      <button class="c-btn c-btn-p2" ontouchstart="tapInput('p2','4')" onclick="tapInput('p2','4')">4</button>
+      <button class="c-btn c-btn-p2" ontouchstart="tapInput('p2','5')" onclick="tapInput('p2','5')">5</button>
+      <button class="c-btn c-btn-p2" ontouchstart="tapInput('p2','6')" onclick="tapInput('p2','6')">6</button>
+      <button class="c-btn c-btn-p2" ontouchstart="tapInput('p2','7')" onclick="tapInput('p2','7')">7</button>
+      <button class="c-btn c-btn-p2" ontouchstart="tapInput('p2','8')" onclick="tapInput('p2','8')">8</button>
+      <button class="c-btn c-btn-p2" ontouchstart="tapInput('p2','9')" onclick="tapInput('p2','9')">9</button>
+      <button class="c-btn c-btn-p2" ontouchstart="tapInput('p2','0')" onclick="tapInput('p2','0')">0</button>
+      <button class="c-btn c-btn-clr" ontouchstart="tapClear('p2')" onclick="tapClear('p2')">CLR</button>
+    </div>
+
+    <div class="freeze-overlay" id="p2-frozen">
+      <i class="fas fa-snowflake text-5xl text-blue-300 animate-spin" style="animation-duration:3s"></i>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────────────────────────────────────────
+     SCREEN 5: TOURNAMENT HUB
+     ───────────────────────────────────────────── -->
+<div id="screen-tourney-setup" class="screen hidden" style="display:none">
+  <div class="flex flex-col items-center h-full p-4">
+    <div class="flex items-center justify-between w-full max-w-md mb-4">
+      <h2 class="f-display text-2xl font-bold text-[#FCD34D]">Competition Setup</h2>
+      <button onclick="showScreen('screen-menu')" class="btn-secondary text-xs py-2 px-3">← Back</button>
+    </div>
+    <div class="flex w-full max-w-md gap-2 mb-2">
+      <input id="tourney-input" type="text" placeholder="Add Player Name…"
+        class="flex-1 bg-[var(--surface)] border border-[var(--border)] p-3 rounded-xl outline-none focus:border-[var(--p2)] text-white f-display text-base"
+        onkeydown="if(event.key==='Enter')addTourneyPlayer()">
+      <button onclick="addTourneyPlayer()" class="px-4 bg-[var(--p2)] text-black rounded-xl font-bold"><i class="fas fa-plus"></i></button>
+    </div>
+    <div class="w-full max-w-md flex justify-between text-xs text-[var(--muted)] mb-2 px-1">
+      <span id="t-player-count">0 Players</span>
+      <button onclick="clearTPlayers()" class="text-red-400">Clear</button>
+    </div>
+    <ul id="t-player-list" class="w-full max-w-md flex-1 bg-[var(--surface)]/50 rounded-xl p-2 overflow-y-auto border border-[var(--border)] space-y-1"></ul>
+    <div class="flex gap-2 w-full max-w-md mt-3">
+      <button id="btn-gen-bracket" onclick="generateBracket()" class="flex-1 btn-primary hidden">START BRACKET</button>
+    </div>
+  </div>
+</div>
+
+<div id="screen-tourney-hub" class="screen hidden" style="display:none">
+  <div class="flex flex-col h-full p-2 gap-2">
+    <header class="flex justify-between items-center bg-[var(--surface)] p-3 rounded-xl border border-[var(--border)]">
+      <div>
+        <h2 class="f-display text-lg font-bold text-white">Bracket</h2>
+        <p id="t-round-label" class="text-xs text-[var(--p2)]">ROUND 1</p>
+      </div>
+      <button onclick="saveAndExit()" class="btn-secondary text-xs py-1.5 px-3">Save & Exit</button>
+    </header>
+    <div class="flex-1 flex flex-col lg:flex-row gap-2 overflow-hidden">
+      <div id="bracket-container" class="flex-1 bg-[var(--surface)]/30 rounded-xl p-2 overflow-y-auto border border-[var(--border)]"></div>
+      <div class="lg:w-72 bg-[var(--surface)] rounded-xl border border-[var(--border)] p-4 flex flex-col justify-center" id="match-card-content"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────────────────────────────────────────
+     OVERLAYS
+     ───────────────────────────────────────────── -->
+
+<!-- Countdown -->
+<div id="countdown-overlay" style="display:none;">
+  <div id="countdown-text" class="countdown-num">3</div>
+</div>
+
+<!-- Winner -->
+<div id="screen-winner" style="display:none;">
+  <div class="winner-card pop">
+    <div class="text-[var(--muted)] f-display text-xs uppercase tracking-widest mb-2">Winner</div>
+    <div class="text-5xl mb-3">👑</div>
+    <div class="winner-name" id="winner-name">Player 1</div>
+    <div class="text-[var(--muted)] mt-2 text-sm" id="winner-reason">Knockout!</div>
+    <div class="mt-6 p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm text-[var(--muted)]">
+      <div class="flex justify-between"><span>Final Score</span><span id="winner-scores" class="text-white f-mono">0 – 0</span></div>
+    </div>
+    <button id="btn-winner-continue" class="btn-primary w-full mt-5">CONTINUE</button>
+  </div>
+</div>
+
+<!-- Teacher Panel -->
+<div id="modal-teacher" class="modal-overlay">
+  <div class="modal-box" style="max-width:640px;">
+    <button onclick="hideTeacher()" class="absolute top-4 right-4 text-[var(--muted)] hover:text-white"><i class="fas fa-times"></i></button>
+    <h2 class="f-display text-xl font-bold text-white mb-4"><i class="fas fa-chart-line mr-2 text-[var(--green)]"></i>Student Performance</h2>
+    <div class="overflow-y-auto max-h-[50vh] rounded-xl border border-[var(--border)]">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-[var(--surface)] text-[var(--muted)] sticky top-0">
+          <tr>
+            <th class="p-3 cursor-pointer hover:text-white f-display font-bold" onclick="sortTeacherTable('name')">Student <i class="fas fa-sort text-xs"></i></th>
+            <th class="p-3 cursor-pointer hover:text-white f-display font-bold" onclick="sortTeacherTable('class')">Class <i class="fas fa-sort text-xs"></i></th>
+            <th class="p-3 cursor-pointer hover:text-white f-display font-bold" onclick="sortTeacherTable('score')">Score <i class="fas fa-sort text-xs"></i></th>
+            <th class="p-3 cursor-pointer hover:text-white f-display font-bold" onclick="sortTeacherTable('accuracy')">Acc% <i class="fas fa-sort text-xs"></i></th>
+            <th class="p-3 cursor-pointer hover:text-white f-display font-bold" onclick="sortTeacherTable('rating')">Rating <i class="fas fa-sort text-xs"></i></th>
+          </tr>
+        </thead>
+        <tbody id="teacher-table-body" class="divide-y divide-[var(--border)]"></tbody>
+      </table>
+    </div>
+    <div class="mt-4 flex justify-end">
+      <button onclick="clearStats()" class="text-red-400 text-xs hover:text-red-300">Reset All Data</button>
+    </div>
+  </div>
+</div>
+
+<!-- History -->
+<div id="modal-history" class="modal-overlay">
+  <div class="modal-box">
+    <button onclick="get('modal-history').classList.remove('open')" class="absolute top-4 right-4 text-[var(--muted)] hover:text-white"><i class="fas fa-times"></i></button>
+    <h2 class="f-display text-xl font-bold text-white mb-4"><i class="fas fa-clock-rotate-left mr-2 text-[var(--p2)]"></i>Tournament History</h2>
+    <div id="history-list" class="space-y-2 max-h-80 overflow-y-auto"></div>
+    <div class="mt-4 flex justify-end">
+      <button onclick="clearHistory()" class="text-red-400 text-xs">Clear</button>
+    </div>
+  </div>
+</div>
+
+<!-- Admin password modal -->
+<div id="modal-admin-pass" class="modal-overlay">
+  <div class="modal-box" style="max-width:340px;">
+    <button onclick="get('modal-admin-pass').classList.remove('open')" class="absolute top-4 right-4 text-[var(--muted)] hover:text-white"><i class="fas fa-times"></i></button>
+    <div class="text-center mb-6">
+      <div class="w-14 h-14 rounded-2xl bg-[var(--p2)]/10 border border-[var(--p2)]/30 flex items-center justify-center mx-auto mb-3">
+        <i class="fas fa-lock text-[#FCD34D] text-xl"></i>
+      </div>
+      <h2 class="f-display text-2xl font-bold text-white">Admin Access</h2>
+      <p class="text-[var(--muted)] text-sm mt-1">Competition mode requires admin password</p>
+    </div>
+    <input id="admin-pass-input" type="password" placeholder="Enter password…"
+      class="w-full bg-[var(--surface)] border border-[var(--border)] p-3 rounded-xl outline-none focus:border-[var(--p2)] text-white mb-3 f-mono text-center text-xl tracking-widest"
+      onkeydown="if(event.key==='Enter')verifyAdminPass()">
+    <button onclick="verifyAdminPass()" class="btn-primary w-full">
+      <i class="fas fa-unlock mr-2"></i>Unlock
+    </button>
+    <p id="admin-pass-error" class="text-red-400 text-xs text-center mt-3 hidden">Incorrect password. Try again.</p>
+  </div>
+</div>
+
+<script src="script.js"></script>
 </body>
 </html>
