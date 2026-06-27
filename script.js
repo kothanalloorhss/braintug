@@ -1,1032 +1,1866 @@
-/**
- * Brain Tug Pro Arena - Main Script
- * Handles game logic, UI navigation, local storage state, and gameplay loop.
- */
+/* =============================================================
+   BRAIN TUG — PRO ARENA  |  script.js
+   Full engine: Setup · Students · Battle · Competition · Stats
+   ============================================================= */
 
-/* ─────────────────────────────────────────────────────────
-   1. GLOBAL STATE & CONFIGURATION
-   ───────────────────────────────────────────────────────── */
-const get = id => document.getElementById(id);
+'use strict';
 
-let state = {
-  mode: 'math', // 'math' or 'english'
-  isTourney: false,
-  muted: false,
-  setupComplete: false,
+/* ─────────────────────────────────────────────────────────────
+   §1  CONSTANTS & CONFIG
+   ───────────────────────────────────────────────────────────── */
+
+const ADMIN_PASSWORD  = 'admin';        // Change to whatever the school wants
+const SETUP_DATE_KEY  = 'bt_setup_date';
+const STATS_KEY       = 'bt_stats';
+const HISTORY_KEY     = 'bt_history';
+const ACTIVE_TOUR_KEY = 'bt_active_tourney';
+const LAST_PLAYERS_KEY= 'bt_last_players';
+const STUDENTS_URL    = 'students.json';// Relative path — place file in same folder
+
+// Rope boundary: if tugValue hits 0 → P1 wins; 100 → P2 wins
+const TUG_WIN_THRESHOLD = 100;
+const FREEZE_DURATION_MS = 2500;
+const WRONG_SPAM_WINDOW_MS = 3000;
+const WRONG_SPAM_COUNT = 3;
+const COUNTDOWN_TICK_MS = 1000;
+const FEEDBACK_VISIBLE_MS = 650;
+const DIFFICULTY_RAMP_INTERVAL = 15; // seconds between auto-difficulty increases
+
+/* ─────────────────────────────────────────────────────────────
+   §2  GLOBAL STATE
+   ───────────────────────────────────────────────────────────── */
+
+const STATE = {
+    /* ── app-level ── */
+    mode: 'math',           // 'math' | 'english'
+    gameType: 'battle',     // 'battle' | 'tournament'
+    students: [],           // loaded from students.json
+    stats: {},              // { "Name": { correct, wrong, timeSum, class, division, gender } }
+    history: [],            // array of tournament result records
+    teacherSort: { key: 'rating', asc: false },
+    muted: false,
+
+    /* ── setup wizard ── */
+    setup: {
+        kbd1Connected: false,
+        kbd2Connected: false,
+        step: 1,            // 1 = waiting for kbd1, 2 = waiting for kbd2, 3 = done
+        firstKeys: {
+            kbd1: null,     // Set of key codes detected first — helps distinguish keyboards
+            kbd2: null,
+        },
+        /* We detect keyboards by listening which physical key arrives first.
+           Once kbd1 is confirmed we wait for a *different* key group for kbd2.
+           In a real multi-keyboard scenario the OS assigns separate event sources,
+           but browsers merge them. We instead use a time-gate heuristic:
+           any keypress triggers kbd1; after 600ms blackout, any NEW keypress = kbd2. */
+        lastKbd1Time: 0,
+    },
+
+    /* ── battle name entry ── */
+    battle: {
+        p1: null,   // selected student object (or { name, class:'?', division:'?', gender:'?' })
+        p2: null,
+        acFocusIndex: { p1: -1, p2: -1 },
+    },
+
+    /* ── active game ── */
+    game: {
+        active: false,
+        difficulty: 1,
+        timer: 60,
+        interval: null,
+        tugValue: 50,       // 0 (P1 wins) ↔ 100 (P2 wins)
+        suddenDeath: false,
+        p1: null,           // player state objects created in setupPlayerState()
+        p2: null,
+    },
+
+    /* ── tournament ── */
+    tourney: {
+        id: null,
+        players: [],        // string names
+        bracket: [],        // array of rounds, each round is array of match objects
+        activeRound: 0,
+        activeMatch: 0,
+    },
 };
 
-let game = {
-  p1: { id: 'p1', name: '', score: 0, combo: 0, input: '', frozen: false, q: {}, freezeTime: null },
-  p2: { id: 'p2', name: '', score: 0, combo: 0, input: '', frozen: false, q: {}, freezeTime: null },
-  rope: 50, // 50 is neutral. <50 favors P1, >50 favors P2.
-  timer: 60,
-  interval: null,
-  active: false,
-  tourneyMatchId: null
-};
+/* ─────────────────────────────────────────────────────────────
+   §3  DOM HELPERS
+   ───────────────────────────────────────────────────────────── */
 
-// LocalStorage Database
-let playersDB = JSON.parse(localStorage.getItem('braintug_players')) || {};
-let historyDB = JSON.parse(localStorage.getItem('braintug_history')) || [];
-let acFocus = { p1: -1, p2: -1 }; // Tracks keyboard focus in autocomplete
+/** Shortcut for getElementById — also exposed globally for inline HTML usage */
+function get(id) { return document.getElementById(id); }
+window.get = get;  // used in inline HTML onclick snippets
 
-// English Question Bank (Extendable)
-const englishBank = [
-  { q: "Opposite of Fast?", opts: ["Slow", "Quick", "Rapid"], a: "1" },
-  { q: "Synonym of Happy?", opts: ["Sad", "Joyful", "Angry"], a: "2" },
-  { q: "Past tense of Go?", opts: ["Goed", "Gone", "Went"], a: "3" },
-  { q: "Opposite of Brave?", opts: ["Cowardly", "Heroic", "Bold"], a: "1" },
-  { q: "Plural of Mouse?", opts: ["Mouses", "Mice", "Meese"], a: "2" },
-  { q: "Synonym of Begin?", opts: ["End", "Stop", "Start"], a: "3" },
-  { q: "Opposite of Sharp?", opts: ["Dull", "Pointy", "Keen"], a: "1" },
-  { q: "Past tense of Eat?", opts: ["Eated", "Ate", "Eaten"], a: "2" },
-  { q: "Synonym of Huge?", opts: ["Tiny", "Small", "Giant"], a: "3" }
-];
-
-/* ─────────────────────────────────────────────────────────
-   2. INITIALIZATION & UTILS
-   ───────────────────────────────────────────────────────── */
-window.onload = () => {
-  // Select Math game by default
-  setGameMode('math'); 
-
-  // Fetch the JSON data from students.json
-  loadStudentData(); 
-
-  if (localStorage.getItem('braintug_setup')) {
-    state.setupComplete = true;
-    showScreen('screen-menu');
-  } else {
-    showScreen('screen-setup');
-    initSetupKeyListeners();
-  }
-  
-  // Resize listener for responsive rope layout
-  window.addEventListener('resize', layoutRope);
-  layoutRope();
-
-  // Close autocomplete on outside click
-  document.addEventListener('click', (e) => {
-    if(!e.target.closest('.name-input-wrap')) {
-      get('p1-ac-list').classList.remove('open');
-      get('p2-ac-list').classList.remove('open');
-    }
-  });
-};
-
-async function loadStudentData() {
-  try {
-    const response = await fetch('students.json');
-    const students = await response.json();
-    
-    // Loop through JSON and add to our local Database if they don't exist
-    students.forEach(s => {
-      if (!playersDB[s.name]) {
-        playersDB[s.name] = { 
-          name: s.name, 
-          class: `${s.class}${s.division}`, 
-          score: 0, 
-          correct: 0, 
-          total: 0, 
-          rating: 1200 
-        };
-      }
+/** Show one named screen, hide all others. Overlays (modal-*) are toggled separately. */
+function showScreen(id) {
+    // All .screen elements get hidden
+    document.querySelectorAll('.screen').forEach(el => {
+        el.classList.add('hidden');
+        el.style.display = '';
     });
-    saveDB();
-  } catch (err) {
-    console.warn('Could not load students.json. Ensure you are running a local server.', err);
-  }
+    const el = get(id);
+    if (!el) return;
+    el.classList.remove('hidden');
+    // Some screens have explicit style="display:none" from HTML — clear that
+    el.style.display = '';
+}
+window.showScreen = showScreen;
+
+/** Open/close modal overlays (elements with class .modal-overlay) */
+function openModal(id) {
+    const el = get(id);
+    if (el) el.classList.add('open');
+}
+function closeModal(id) {
+    const el = get(id);
+    if (el) el.classList.remove('open');
 }
 
-function saveDB() {
-  localStorage.setItem('braintug_players', JSON.stringify(playersDB));
+/** Flash an inline feedback element (the ±GOOD/MISS banners) */
+function flashFeedback(elId, text, colorClass) {
+    const el = get(elId);
+    if (!el) return;
+    el.textContent = text;
+    el.className = `feedback-flash ${colorClass}`;
+    el.style.opacity = '1';
+    el.style.transform = 'translate(-50%, -50%) scale(1.1)';
+    setTimeout(() => {
+        el.style.opacity = '0';
+        el.style.transform = 'translate(-50%, -50%) scale(1)';
+    }, FEEDBACK_VISIBLE_MS);
 }
 
-function saveHistory() {
-  localStorage.setItem('braintug_history', JSON.stringify(historyDB));
+/** Briefly animate a key on the setup screen */
+function animateSetupKey(keyId) {
+    const el = get(keyId);
+    if (!el) return;
+    el.classList.add('active');
+    setTimeout(() => el.classList.remove('active'), 200);
 }
 
-function playAudio(id) {
-  if (state.muted) return;
-  const audio = get(id);
-  if (audio) {
-    audio.currentTime = 0;
-    audio.play().catch(()=>{});
-  }
-}
+/* ─────────────────────────────────────────────────────────────
+   §4  AUDIO ENGINE
+   ───────────────────────────────────────────────────────────── */
+
+const AUDIO = {
+    bgm:     null,
+    correct: null,
+    wrong:   null,
+    win:     null,
+    countdown: null,
+
+    init() {
+        this.bgm      = get('bgm');
+        this.correct  = get('sfx-correct');
+        this.wrong    = get('sfx-wrong');
+        this.win      = get('sfx-win');
+        this.countdown = get('sfx-countdown');
+    },
+
+    playBGM() {
+        if (STATE.muted || !this.bgm) return;
+        this.bgm.volume = 0.18;
+        this.bgm.play().catch(() => {});
+    },
+
+    stopBGM() {
+        if (!this.bgm) return;
+        this.bgm.pause();
+        this.bgm.currentTime = 0;
+    },
+
+    playSFX(el) {
+        if (STATE.muted || !el) return;
+        el.currentTime = 0;
+        el.play().catch(() => {});
+    },
+
+    playCorrect()   { this.playSFX(this.correct);  },
+    playWrong()     { this.playSFX(this.wrong);    },
+    playWin()       { this.playSFX(this.win);      },
+    playCountdown() { this.playSFX(this.countdown);},
+};
 
 function toggleMute() {
-  state.muted = !state.muted;
-  const icon = get('icon-mute');
-  if (state.muted) {
-    icon.classList.remove('fa-volume-up');
-    icon.classList.add('fa-volume-mute', 'text-red-400');
-    get('bgm').pause();
-  } else {
-    icon.classList.remove('fa-volume-mute', 'text-red-400');
-    icon.classList.add('fa-volume-up');
-    get('bgm').play().catch(()=>{});
-  }
-}
-
-function showScreen(screenId) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
-  get(screenId).classList.remove('hidden');
-  
-  if(screenId === 'screen-menu') {
-    get('bgm').play().catch(()=>{});
-  }
-}
-
-/* ─────────────────────────────────────────────────────────
-   3. SETUP WIZARD (KEYBOARDS)
-   ───────────────────────────────────────────────────────── */
-let setupPhase = 1;
-
-function initSetupKeyListeners() {
-  document.addEventListener('keydown', handleSetupKey);
-}
-
-function handleSetupKey(e) {
-  if (state.setupComplete || get('screen-setup').classList.contains('hidden')) return;
-  
-  if (setupPhase === 1) {
-    playAudio('sfx-correct');
-    get('kbd-slot-1').classList.remove('waiting');
-    get('kbd-slot-1').classList.add('connected');
-    get('kbd1-label').innerText = 'CONNECTED';
-    get('kbd1-label').classList.replace('text-[var(--p1)]', 'text-[var(--green)]');
-    
-    get('kbd-slot-2').classList.remove('idle');
-    get('kbd-slot-2').classList.add('waiting');
-    get('kbd2-label').innerText = 'PRESS NUMPAD KEY';
-    get('kbd2-label').classList.replace('text-[var(--muted)]', 'text-[var(--p2)]');
-    
-    get('setup-step-title').innerText = 'Step 2 — Player 2 Keyboard';
-    get('setup-step-sub').innerText = 'Press any key on the numpad to confirm connection';
-    setupPhase = 2;
-  } else if (setupPhase === 2) {
-    if (e.location === KeyboardEvent.DOM_KEY_LOCATION_NUMPAD || "0123456789".includes(e.key)) {
-      playAudio('sfx-correct');
-      get('kbd-slot-2').classList.remove('waiting');
-      get('kbd-slot-2').classList.add('connected');
-      get('kbd2-label').innerText = 'CONNECTED';
-      get('kbd2-label').classList.replace('text-[var(--p2)]', 'text-[var(--green)]');
-      
-      get('setup-step-title').innerText = 'Setup Complete!';
-      get('setup-step-sub').innerText = 'Navigating to Arena...';
-      
-      setTimeout(() => {
-        localStorage.setItem('braintug_setup', 'true');
-        state.setupComplete = true;
-        showScreen('screen-menu');
-      }, 1500);
+    STATE.muted = !STATE.muted;
+    const icon = get('icon-mute');
+    if (icon) {
+        icon.className = STATE.muted
+            ? 'fas fa-volume-mute' 
+            : 'fas fa-volume-up text-[var(--muted)] text-sm';
     }
-  }
+    if (STATE.muted) AUDIO.stopBGM();
+    else if (STATE.game.active) AUDIO.playBGM();
+}
+window.toggleMute = toggleMute;
+
+/* ─────────────────────────────────────────────────────────────
+   §5  STUDENT DATABASE  (loads students.json)
+   ───────────────────────────────────────────────────────────── */
+
+async function loadStudents() {
+    try {
+        const resp = await fetch(STUDENTS_URL);
+        if (!resp.ok) throw new Error('fetch failed');
+        STATE.students = await resp.json();
+    } catch (e) {
+        // Graceful fallback — game still works without the JSON
+        console.warn('students.json not found or invalid. Autocomplete will be empty.');
+        STATE.students = [];
+    }
+}
+
+/**
+ * Search students by name prefix (case-insensitive).
+ * Returns up to `limit` results sorted by best match.
+ */
+function searchStudents(query, limit = 6) {
+    if (!query || query.length < 1) return [];
+    const q = query.toLowerCase().trim();
+    return STATE.students
+        .filter(s => s.name.toLowerCase().includes(q))
+        .sort((a, b) => {
+            // Exact prefix match ranks higher
+            const aStart = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+            const bStart = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+            return aStart - bStart || a.name.localeCompare(b.name);
+        })
+        .slice(0, limit);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §6  DAILY SETUP WIZARD
+   ───────────────────────────────────────────────────────────── */
+
+/**
+ * Decide whether to show setup or go straight to menu.
+ * Setup runs once per calendar day, tracked in localStorage.
+ * Pass `force = true` to re-run regardless.
+ */
+function runSetup(force = false) {
+    const today = new Date().toDateString();
+    const lastSetup = localStorage.getItem(SETUP_DATE_KEY);
+
+    if (!force && lastSetup === today) {
+        // Already done today — go to menu
+        showScreen('screen-menu');
+        return;
+    }
+
+    // Reset wizard state
+    STATE.setup.kbd1Connected = false;
+    STATE.setup.kbd2Connected = false;
+    STATE.setup.step = 1;
+    STATE.setup.lastKbd1Time = 0;
+
+    // Reset UI
+    const slot1 = get('kbd-slot-1');
+    const slot2 = get('kbd-slot-2');
+    slot1.className = 'kbd-slot waiting';
+    slot2.className = 'kbd-slot idle';
+    get('kbd1-label').textContent = 'PRESS ANY KEY';
+    get('kbd1-status').textContent = 'Player 1 Keyboard';
+    get('kbd2-label').textContent = 'WAITING…';
+    get('kbd2-status').textContent = 'Player 2 Keyboard';
+    get('kbd2-label').style.color = 'var(--muted)';
+    get('setup-step-title').textContent = 'Step 1 — Player 1 Keyboard';
+    get('setup-step-sub').textContent = 'Press any key on the first keyboard to confirm connection';
+
+    showScreen('screen-setup');
+
+    // Attach the one-time global listener for the wizard
+    document.addEventListener('keydown', onSetupKeydown);
+}
+window.runSetup = runSetup;
+
+/**
+ * Keyboard listener active ONLY during setup wizard.
+ * Removed once setup completes or is skipped.
+ */
+function onSetupKeydown(e) {
+    e.preventDefault();
+
+    if (STATE.setup.step === 1) {
+        // ── Connect Keyboard 1 ──
+        STATE.setup.lastKbd1Time = Date.now();
+        STATE.setup.kbd1Connected = true;
+        STATE.setup.step = 2;
+
+        // Animate slot 1
+        const slot1 = get('kbd-slot-1');
+        slot1.className = 'kbd-slot connected';
+        get('kbd1-label').textContent = '✓ CONNECTED';
+        get('kbd1-label').style.color = 'var(--green)';
+        get('kbd1-status').textContent = `Player 1 · ${e.key.toUpperCase()} detected`;
+
+        // Flash key visuals
+        const p1Keys = ['k1-q', 'k1-w', 'k1-e', 'k1-a', 'k1-s', 'k1-d'];
+        p1Keys.forEach((k, i) => setTimeout(() => animateSetupKey(k), i * 60));
+
+        // Activate slot 2
+        const slot2 = get('kbd-slot-2');
+        slot2.className = 'kbd-slot waiting';
+        get('kbd2-label').textContent = 'PRESS ANY KEY';
+        get('kbd2-label').style.color = 'var(--p2)';
+
+        // Update step message
+        get('setup-step-title').textContent = 'Step 2 — Player 2 Keyboard';
+        get('setup-step-sub').textContent = 'Now press any key on the second keyboard';
+
+    } else if (STATE.setup.step === 2) {
+        // ── Connect Keyboard 2 ──
+        // Brief blackout period to avoid same key re-triggering
+        if (Date.now() - STATE.setup.lastKbd1Time < 600) return;
+
+        STATE.setup.kbd2Connected = true;
+        STATE.setup.step = 3;
+
+        const slot2 = get('kbd-slot-2');
+        slot2.className = 'kbd-slot connected';
+        get('kbd2-label').textContent = '✓ CONNECTED';
+        get('kbd2-label').style.color = 'var(--green)';
+        get('kbd2-status').textContent = `Player 2 · ${e.key.toUpperCase()} detected`;
+
+        const p2Keys = ['k2-4', 'k2-5', 'k2-6', 'k2-7', 'k2-8', 'k2-9'];
+        p2Keys.forEach((k, i) => setTimeout(() => animateSetupKey(k), i * 60));
+
+        get('setup-step-title').textContent = '✓ Both Keyboards Connected!';
+        get('setup-step-sub').textContent = 'Setup complete. Launching arena…';
+
+        // Remove listener & proceed after a moment
+        document.removeEventListener('keydown', onSetupKeydown);
+        setTimeout(completeSetup, 1200);
+    }
+}
+
+function completeSetup() {
+    localStorage.setItem(SETUP_DATE_KEY, new Date().toDateString());
+    showScreen('screen-menu');
 }
 
 function skipSetup() {
-  localStorage.setItem('braintug_setup', 'true');
-  state.setupComplete = true;
-  showScreen('screen-menu');
+    document.removeEventListener('keydown', onSetupKeydown);
+    localStorage.setItem(SETUP_DATE_KEY, new Date().toDateString());
+    showScreen('screen-menu');
+}
+window.skipSetup = skipSetup;
+
+/* ─────────────────────────────────────────────────────────────
+   §7  GAME MODE SELECTOR
+   ───────────────────────────────────────────────────────────── */
+
+function setGameMode(mode) {
+    STATE.mode = mode;
+    const mathBtn = get('btn-mode-math');
+    const engBtn  = get('btn-mode-eng');
+
+    if (mode === 'math') {
+        mathBtn.className = 'px-5 py-2 rounded-lg f-display font-bold text-sm tracking-wide transition bg-[var(--p1)] text-white';
+        engBtn.className  = 'px-5 py-2 rounded-lg f-display font-bold text-sm tracking-wide transition text-[var(--muted)]';
+    } else {
+        engBtn.className  = 'px-5 py-2 rounded-lg f-display font-bold text-sm tracking-wide transition bg-[var(--p2)] text-black';
+        mathBtn.className = 'px-5 py-2 rounded-lg f-display font-bold text-sm tracking-wide transition text-[var(--muted)]';
+    }
+}
+window.setGameMode = setGameMode;
+
+// Initialise math as selected
+function initModeButtons() {
+    get('btn-mode-math').className = 'px-5 py-2 rounded-lg f-display font-bold text-sm tracking-wide transition bg-[var(--p1)] text-white';
+    get('btn-mode-eng').className  = 'px-5 py-2 rounded-lg f-display font-bold text-sm tracking-wide transition text-[var(--muted)]';
 }
 
-function runSetup() {
-  setupPhase = 1;
-  state.setupComplete = false;
-  get('kbd-slot-1').className = 'kbd-slot waiting';
-  get('kbd1-label').innerText = 'PRESS ANY KEY';
-  get('kbd1-label').className = 'f-display font-bold text-xs tracking-widest uppercase mt-3 text-[var(--p1)]';
-  get('kbd-slot-2').className = 'kbd-slot idle';
-  get('kbd2-label').innerText = 'WAITING…';
-  get('kbd2-label').className = 'f-display font-bold text-xs tracking-widest uppercase mt-3 text-[var(--muted)]';
-  get('setup-step-title').innerText = 'Step 1 — Player 1 Keyboard';
-  get('setup-step-sub').innerText = 'Press any key on the first keyboard to confirm connection';
-  showScreen('screen-setup');
-}
-
-/* ─────────────────────────────────────────────────────────
-   4. MENU & PLAYER SELECTION
-   ───────────────────────────────────────────────────────── */
-function setGameMode(m) {
-  state.mode = m;
-  if (m === 'math') {
-    get('btn-mode-math').classList.remove('text-[var(--muted)]');
-    get('btn-mode-math').classList.add('bg-[var(--p1)]', 'text-white');
-    get('btn-mode-eng').classList.remove('bg-[var(--p2)]', 'text-white');
-    get('btn-mode-eng').classList.add('text-[var(--muted)]');
-  } else {
-    get('btn-mode-eng').classList.remove('text-[var(--muted)]');
-    get('btn-mode-eng').classList.add('bg-[var(--p2)]', 'text-black');
-    get('btn-mode-math').classList.remove('bg-[var(--p1)]', 'text-white');
-    get('btn-mode-math').classList.add('text-[var(--muted)]');
-  }
-}
+/* ─────────────────────────────────────────────────────────────
+   §8  BATTLE MODE — NAME ENTRY WITH AUTOCOMPLETE
+   ───────────────────────────────────────────────────────────── */
 
 function setupBattleMode() {
-  state.isTourney = false;
-  clearPlayerSelection('p1');
-  clearPlayerSelection('p2');
-  showScreen('screen-battle-entry');
+    STATE.gameType = 'battle';
+    STATE.battle.p1 = null;
+    STATE.battle.p2 = null;
+    STATE.battle.acFocusIndex = { p1: -1, p2: -1 };
+
+    // Clear inputs
+    get('p1-name-input').value = '';
+    get('p2-name-input').value = '';
+    closeAutocomplete('p1');
+    closeAutocomplete('p2');
+    get('p1-selected-card').classList.add('hidden');
+    get('p2-selected-card').classList.add('hidden');
+    get('btn-start-battle').disabled = true;
+
+    showScreen('screen-battle-entry');
+    get('p1-name-input').focus();
 }
+window.setupBattleMode = setupBattleMode;
 
-function onNameInput(pId) {
-  acFocus[pId] = -1; // Reset focus on new input
-  const val = get(`${pId}-name-input`).value.trim().toLowerCase();
-  const list = get(`${pId}-ac-list`);
-  list.innerHTML = '';
-  
-  if (val.length === 0) {
-    list.classList.remove('open');
-    return;
-  }
+/** Called on every keystroke in a name input */
+function onNameInput(player) {
+    const input = get(`${player}-name-input`);
+    const query = input.value;
 
-  const matches = Object.keys(playersDB).filter(k => k.toLowerCase().includes(val));
-  
-  if (matches.length > 0) {
-    matches.forEach((name, index) => {
-      const pData = playersDB[name];
-      const div = document.createElement('div');
-      div.className = 'ac-item';
-      div.id = `${pId}-ac-item-${index}`; 
-      div.innerHTML = `<span class="ac-name">${name}</span> <span class="ac-meta">🎯 ${pData.rating}</span>`;
-      div.onclick = () => selectPlayer(pId, name);
-      list.appendChild(div);
-    });
-    list.classList.add('open');
-  } else {
-    const div = document.createElement('div');
-    div.className = 'ac-item text-[var(--p2)]';
-    div.innerHTML = `<span class="ac-name">Create "${val}" <i class="fas fa-plus-circle ml-1"></i></span>`;
-    div.onclick = () => selectPlayer(pId, get(`${pId}-name-input`).value.trim());
-    list.appendChild(div);
-    list.classList.add('open');
-  }
-}
-
-function onNameKeydown(e, pId) {
-  const list = get(`${pId}-ac-list`);
-  if (!list.classList.contains('open')) return;
-
-  const items = list.querySelectorAll('.ac-item');
-  if (items.length === 0) return;
-
-  const isP1 = pId === 'p1';
-  
-  // P1 uses Standard Arrows. P2 uses Numpad 8 (Up) and Numpad 2 (Down)
-  const keyUp = isP1 ? (e.key === 'ArrowUp') : (e.code === 'Numpad8');
-  const keyDown = isP1 ? (e.key === 'ArrowDown') : (e.code === 'Numpad2');
-  const keyEnter = isP1 ? (e.key === 'Enter') : (e.code === 'NumpadEnter' || e.key === 'Enter');
-
-  if (keyDown) {
-    e.preventDefault();
-    acFocus[pId] = Math.min(acFocus[pId] + 1, items.length - 1);
-    updateACFocus(pId, items);
-  } else if (keyUp) {
-    e.preventDefault();
-    acFocus[pId] = Math.max(acFocus[pId] - 1, 0);
-    updateACFocus(pId, items);
-  } else if (keyEnter) {
-    e.preventDefault();
-    if (acFocus[pId] >= 0 && acFocus[pId] < items.length) {
-      items[acFocus[pId]].click();
-    } else if (items.length > 0) {
-      items[0].click(); // Auto-select top item
+    // If a student is already confirmed for this slot, typing again clears the selection
+    if (STATE.battle[player]) {
+        STATE.battle[player] = null;
+        get(`${player}-selected-card`).classList.add('hidden');
+        updateStartBattleButton();
     }
-  }
-}
 
-function updateACFocus(pId, items) {
-  items.forEach((item, idx) => {
-    if (idx === acFocus[pId]) {
-      item.classList.add('focused', 'bg-white/10'); 
-      item.scrollIntoView({ block: 'nearest' });    
-    } else {
-      item.classList.remove('focused', 'bg-white/10');
+    if (query.length === 0) {
+        closeAutocomplete(player);
+        return;
     }
-  });
+
+    const results = searchStudents(query);
+    renderAutocomplete(player, results, query);
+}
+window.onNameInput = onNameInput;
+
+/** Keyboard navigation inside autocomplete list */
+function onNameKeydown(event, player) {
+    const list = get(`${player}-ac-list`);
+    const items = list.querySelectorAll('.ac-item');
+    let idx = STATE.battle.acFocusIndex[player];
+
+    if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        idx = Math.min(idx + 1, items.length - 1);
+        STATE.battle.acFocusIndex[player] = idx;
+        highlightAcItem(items, idx);
+    } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        idx = Math.max(idx - 1, 0);
+        STATE.battle.acFocusIndex[player] = idx;
+        highlightAcItem(items, idx);
+    } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (idx >= 0 && items[idx]) {
+            items[idx].click();
+        } else {
+            // Confirm free-text if no dropdown selection
+            confirmFreeText(player);
+        }
+    } else if (event.key === 'Escape') {
+        closeAutocomplete(player);
+    } else if (event.key === 'Tab') {
+        // Tab moves focus to next player's input
+        closeAutocomplete(player);
+    }
+}
+window.onNameKeydown = onNameKeydown;
+
+function highlightAcItem(items, idx) {
+    items.forEach(el => el.classList.remove('focused'));
+    if (items[idx]) {
+        items[idx].classList.add('focused');
+        items[idx].scrollIntoView({ block: 'nearest' });
+    }
 }
 
-function selectPlayer(pId, name) {
-  if (!playersDB[name]) {
-    playersDB[name] = { name, class: 'General', score: 0, correct: 0, total: 0, rating: 1200 };
-    saveDB();
-  }
-  
-  game[pId].name = name;
-  get(`${pId}-name-input`).value = '';
-  get(`${pId}-name-input`).parentElement.style.display = 'none';
-  get(`${pId}-ac-list`).classList.remove('open');
-  
-  get(`${pId}-selected-card`).classList.remove('hidden');
-  get(`${pId}-sc-init`).innerText = name.substring(0, 2).toUpperCase();
-  get(`${pId}-sc-name`).innerText = name;
-  get(`${pId}-sc-meta`).innerText = `Rating: ${playersDB[name].rating}`;
+/** Build and display the autocomplete dropdown */
+function renderAutocomplete(player, results, query) {
+    const list = get(`${player}-ac-list`);
+    STATE.battle.acFocusIndex[player] = -1;
 
-  checkBattleReady();
+    if (results.length === 0) {
+        closeAutocomplete(player);
+        return;
+    }
+
+    const ql = query.toLowerCase();
+    list.innerHTML = results.map((s, i) => {
+        // Bold-highlight the matching characters in the name
+        const nameLower  = s.name.toLowerCase();
+        const matchStart = nameLower.indexOf(ql);
+        let displayName  = s.name;
+        if (matchStart !== -1) {
+            displayName =
+                s.name.slice(0, matchStart) +
+                `<span class="ac-highlight">${s.name.slice(matchStart, matchStart + query.length)}</span>` +
+                s.name.slice(matchStart + query.length);
+        }
+        const glyph = s.gender === 'F' ? '♀' : '♂';
+        return `
+            <div class="ac-item" data-index="${i}" onclick="selectStudent('${player}', ${STATE.students.indexOf(s)})">
+                <span class="ac-name">${displayName}</span>
+                <span class="ac-meta">Cls ${s.class}${s.division} ${glyph}</span>
+            </div>`;
+    }).join('');
+
+    list.classList.add('open');
 }
 
-function clearPlayerSelection(pId) {
-  game[pId].name = '';
-  get(`${pId}-selected-card`).classList.add('hidden');
-  get(`${pId}-name-input`).parentElement.style.display = 'block';
-  get(`${pId}-name-input`).focus();
-  checkBattleReady();
+function closeAutocomplete(player) {
+    const list = get(`${player}-ac-list`);
+    if (list) {
+        list.classList.remove('open');
+        list.innerHTML = '';
+    }
+    STATE.battle.acFocusIndex[player] = -1;
 }
 
-function checkBattleReady() {
-  const btn = get('btn-start-battle');
-  if (game.p1.name && game.p2.name) {
-    btn.disabled = false;
-    btn.classList.add('neon-p1');
-  } else {
-    btn.disabled = true;
-    btn.classList.remove('neon-p1');
-  }
+/** Called when a student is chosen from the autocomplete list */
+function selectStudent(player, studentIndex) {
+    const student = STATE.students[studentIndex];
+    if (!student) return;
+
+    STATE.battle[player] = student;
+
+    // Update the input field
+    get(`${player}-name-input`).value = student.name;
+    closeAutocomplete(player);
+
+    // Show the confirmation card
+    const card  = get(`${player}-selected-card`);
+    const init  = get(`${player}-sc-init`);
+    const name  = get(`${player}-sc-name`);
+    const meta  = get(`${player}-sc-meta`);
+    init.textContent = student.name.charAt(0).toUpperCase();
+    name.textContent = student.name;
+    const glyph = student.gender === 'F' ? '♀' : '♂';
+    meta.textContent = `Class ${student.class} · Division ${student.division} · ${glyph}`;
+    card.classList.remove('hidden');
+
+    updateStartBattleButton();
+}
+window.selectStudent = selectStudent;
+
+/**
+ * If user types a name not in the list and presses Enter,
+ * create a minimal ad-hoc player object so the game can still start.
+ */
+function confirmFreeText(player) {
+    const val = get(`${player}-name-input`).value.trim();
+    if (!val) return;
+    closeAutocomplete(player);
+
+    // Check if it partially matches a student — if exactly one match, auto-select it
+    const results = searchStudents(val);
+    if (results.length === 1) {
+        selectStudent(player, STATE.students.indexOf(results[0]));
+        return;
+    }
+
+    STATE.battle[player] = { name: val, class: '?', division: '?', gender: '?' };
+    const card = get(`${player}-selected-card`);
+    get(`${player}-sc-init`).textContent = val.charAt(0).toUpperCase();
+    get(`${player}-sc-name`).textContent = val;
+    get(`${player}-sc-meta`).textContent = 'Guest Player';
+    card.classList.remove('hidden');
+    updateStartBattleButton();
 }
 
-/* ─────────────────────────────────────────────────────────
-   5. GAME ENGINE
-   ───────────────────────────────────────────────────────── */
+function clearPlayerSelection(player) {
+    STATE.battle[player] = null;
+    get(`${player}-name-input`).value = '';
+    get(`${player}-selected-card`).classList.add('hidden');
+    closeAutocomplete(player);
+    updateStartBattleButton();
+    get(`${player}-name-input`).focus();
+}
+window.clearPlayerSelection = clearPlayerSelection;
+
+function updateStartBattleButton() {
+    const btn = get('btn-start-battle');
+    const p1ok = (STATE.battle.p1 !== null) || (get('p1-name-input').value.trim().length > 0);
+    const p2ok = (STATE.battle.p2 !== null) || (get('p2-name-input').value.trim().length > 0);
+    btn.disabled = !(p1ok && p2ok);
+}
+
+/** Fired when the FIGHT! button is pressed */
 function startBattleGame() {
-  showScreen('screen-game');
-  prepGameUI();
-  runCountdown();
-}
+    // Confirm any free-text that hasn't been selected yet
+    if (!STATE.battle.p1) confirmFreeText('p1');
+    if (!STATE.battle.p2) confirmFreeText('p2');
 
-function prepGameUI() {
-  game.rope = 50;
-  game.timer = 60;
-  game.active = false;
-  
-  ['p1', 'p2'].forEach(pId => {
-    game[pId].score = 0;
-    game[pId].combo = 0;
-    game[pId].input = '';
-    game[pId].frozen = false;
-    
-    get(`${pId}-score`).innerText = '0';
-    get(`${pId}-combo`).style.display = 'none';
-    get(`${pId}-name`).innerText = game[pId].name;
-    get(`${pId}-avatar-txt`).innerText = game[pId].name.substring(0, 2).toUpperCase();
-    get(`${pId}-input`).innerText = '';
-    get(`${pId}-frozen`).style.display = 'none';
-    
-    if (state.mode === 'math') {
-      get(`${pId}-eng-opts`).classList.add('hidden');
-      get(`${pId}-input`).classList.remove('hidden');
-      document.querySelectorAll(`.c-btn-${pId}`).forEach(b => b.style.display = 'flex');
-      document.querySelectorAll(`.c-btn-clr`).forEach(b => b.style.display = 'flex');
-    } else {
-      get(`${pId}-eng-opts`).classList.remove('hidden');
-      get(`${pId}-input`).classList.add('hidden');
-      document.querySelectorAll(`.c-btn-${pId}`).forEach(b => {
-        if(["1","2","3"].includes(b.innerText)) b.style.display = 'flex';
-        else b.style.display = 'none';
-      });
-      document.querySelectorAll(`.c-btn-clr`).forEach(b => b.style.display = 'none');
+    const p1 = STATE.battle.p1;
+    const p2 = STATE.battle.p2;
+
+    if (!p1 || !p2) {
+        alert('Both players must enter their names.');
+        return;
     }
-  });
-
-  updateRopeVisuals();
-  get('game-timer').innerText = game.timer;
-  get('timer-pill').className = 'timer-pill';
-}
-
-function runCountdown() {
-  const overlay = get('countdown-overlay');
-  const txt = get('countdown-text');
-  overlay.style.display = 'flex';
-  txt.className = 'countdown-num pop';
-  
-  let count = 3;
-  txt.innerText = count;
-  playAudio('sfx-countdown');
-
-  let iv = setInterval(() => {
-    count--;
-    if (count > 0) {
-      txt.innerText = count;
-      txt.classList.remove('pop');
-      void txt.offsetWidth; 
-      txt.classList.add('pop');
-    } else if (count === 0) {
-      txt.className = 'countdown-fight pop';
-      txt.innerText = 'FIGHT!';
-    } else {
-      clearInterval(iv);
-      overlay.style.display = 'none';
-      beginMatch();
+    if (p1.name === p2.name) {
+        alert('Both players cannot have the same name. Please choose different names.');
+        return;
     }
-  }, 1000);
+
+    prepareGame(p1.name, p2.name);
 }
+window.startBattleGame = startBattleGame;
 
-function beginMatch() {
-  game.active = true;
-  generateQuestion('p1');
-  generateQuestion('p2');
-  
-  game.interval = setInterval(() => {
-    game.timer--;
-    get('game-timer').innerText = game.timer;
-    
-    if(game.timer <= 10) {
-      get('timer-pill').classList.add('danger', 'sd');
-    }
-    
-    if(game.timer <= 0) {
-      endMatch();
-    }
-  }, 1000);
-}
-
-function generateQuestion(pId) {
-  const pData = playersDB[game[pId].name];
-  const rating = pData ? pData.rating : 1200;
-  
-  if (state.mode === 'math') {
-    let max = rating > 1400 ? 50 : (rating > 1200 ? 20 : 10);
-    let a = Math.floor(Math.random() * max) + 1;
-    let b = Math.floor(Math.random() * max) + 1;
-    let ops = rating > 1300 ? ['+', '-', '*'] : ['+', '-'];
-    let op = ops[Math.floor(Math.random() * ops.length)];
-    
-    if (op === '-' && a < b) [a, b] = [b, a];
-    
-    let ans = 0;
-    if (op === '+') ans = a + b;
-    if (op === '-') ans = a - b;
-    if (op === '*') { a = a%12+2; b = b%12+2; ans = a * b; } 
-    
-    game[pId].q = { text: `${a} ${op} ${b}`, a: String(ans) };
-    get(`${pId}-q-text`).innerText = game[pId].q.text;
-    
-  } else {
-    const q = englishBank[Math.floor(Math.random() * englishBank.length)];
-    game[pId].q = q;
-    get(`${pId}-q-text`).innerText = q.q;
-    
-    const optsContainer = get(`${pId}-eng-opts`);
-    optsContainer.innerHTML = '';
-    q.opts.forEach((opt, idx) => {
-      const btn = document.createElement('div');
-      btn.className = `eng-opt eng-opt-${pId}`;
-      btn.innerHTML = `<span class="text-[var(--muted)] mr-1">${idx+1}.</span> ${opt}`;
-      btn.onclick = () => tapInput(pId, String(idx+1));
-      optsContainer.appendChild(btn);
-    });
-  }
-}
-
-/* ─────────────────────────────────────────────────────────
-   6. INPUT HANDLING & LOGIC
-   ───────────────────────────────────────────────────────── */
-function tapInput(pId, val) {
-  if (!game.active || game[pId].frozen) return;
-  
-  const p = game[pId];
-  
-  if (state.mode === 'english') {
-    if (val === p.q.a) triggerCorrect(pId);
-    else triggerWrong(pId);
-  } else {
-    p.input += val;
-    get(`${pId}-input`).innerText = p.input;
-    
-    if (p.q.a === p.input) {
-      triggerCorrect(pId);
-    } else if (!p.q.a.startsWith(p.input)) {
-      triggerWrong(pId);
-    }
-  }
-}
-
-function tapClear(pId) {
-  if (!game.active || game[pId].frozen) return;
-  game[pId].input = '';
-  get(`${pId}-input`).innerText = '';
-}
-
-function triggerCorrect(pId) {
-  playAudio('sfx-correct');
-  const p = game[pId];
-  
-  p.score += 10 + (p.combo * 2);
-  p.combo++;
-  p.input = '';
-  get(`${pId}-input`).innerText = '';
-  get(`${pId}-score`).innerText = p.score;
-  
-  if (p.combo >= 3) {
-    const comboEl = get(`${pId}-combo`);
-    comboEl.style.display = 'inline-block';
-    comboEl.innerText = `🔥 ${p.combo} COMBO`;
-    comboEl.classList.remove('pop');
-    void comboEl.offsetWidth;
-    comboEl.classList.add('pop');
-  }
-
-  const fb = get(`${pId}-feedback`);
-  fb.innerText = "CORRECT";
-  fb.className = 'feedback-flash text-[var(--green)] fade-in-up';
-  setTimeout(() => fb.classList.remove('fade-in-up'), 500);
-
-  playersDB[p.name].correct++;
-  playersDB[p.name].total++;
-
-  const pullAmt = 3 + Math.min(p.combo, 5);
-  if (pId === 'p1') game.rope = Math.max(0, game.rope - pullAmt);
-  else game.rope = Math.min(100, game.rope + pullAmt);
-  
-  updateRopeVisuals();
-  
-  if (game.rope <= 0 || game.rope >= 100) {
-    endMatch();
-  } else {
-    generateQuestion(pId);
-  }
-}
-
-function triggerWrong(pId) {
-  playAudio('sfx-wrong');
-  const p = game[pId];
-  p.combo = 0;
-  p.input = '';
-  get(`${pId}-input`).innerText = '';
-  get(`${pId}-combo`).style.display = 'none';
-  
-  playersDB[p.name].total++;
-
-  const area = get(`zone-${pId}`);
-  area.classList.remove('shake');
-  void area.offsetWidth;
-  area.classList.add('shake');
-  
-  p.frozen = true;
-  get(`${pId}-frozen`).style.display = 'flex';
-  
-  setTimeout(() => {
-    p.frozen = false;
-    get(`${pId}-frozen`).style.display = 'none';
-  }, 1500);
-}
-
-document.addEventListener('keydown', (e) => {
-  if (!game.active) return;
-  
-  // Player 1
-  if ("1234567890".includes(e.key) && e.location !== KeyboardEvent.DOM_KEY_LOCATION_NUMPAD) {
-    tapInput('p1', e.key);
-  }
-  if (["Backspace", "c", "C"].includes(e.key) && e.location !== KeyboardEvent.DOM_KEY_LOCATION_NUMPAD) {
-    tapClear('p1');
-  }
-  
-  // Player 2
-  const p2map = {"Numpad1":"1","Numpad2":"2","Numpad3":"3","Numpad4":"4","Numpad5":"5","Numpad6":"6","Numpad7":"7","Numpad8":"8","Numpad9":"9","Numpad0":"0"};
-  if (p2map[e.code]) {
-    tapInput('p2', p2map[e.code]);
-  }
-  if (["NumpadDecimal", "NumpadEnter", "Delete"].includes(e.code)) {
-    tapClear('p2');
-  }
-});
-
-/* ─────────────────────────────────────────────────────────
-   7. ROPE RENDERING
-   ───────────────────────────────────────────────────────── */
-function layoutRope() {
-  const isLandscape = window.innerWidth > window.innerHeight;
-  const divider = get('rope-divider');
-  const z1 = get('zone-p1');
-  const z2 = get('zone-p2');
-
-  if (isLandscape) {
-    divider.className = 'rope-divider v';
-    z1.style = 'position:absolute;top:0;bottom:0;left:0;right:50%;';
-    z2.style = 'position:absolute;top:0;bottom:0;left:50%;right:0;';
-    z1.querySelector('.player-hud').style.transform = 'none';
-  } else {
-    divider.className = 'rope-divider h';
-    z1.style = 'position:absolute;top:0;left:0;right:0;bottom:50%;';
-    z2.style = 'position:absolute;top:50%;left:0;right:0;bottom:0;';
-    z1.querySelector('.player-hud').style.transform = 'rotate(180deg)';
-    z1.querySelector('.q-area').style.transform = 'rotate(180deg)';
-  }
-  updateRopeVisuals();
-}
-
-function updateRopeVisuals() {
-  const marker = get('rope-marker');
-  const pctText = get('rope-pct');
-  const isLandscape = window.innerWidth > window.innerHeight;
-  
-  if (isLandscape) {
-    marker.style.left = `${game.rope}%`;
-    marker.style.top = `50%`;
-  } else {
-    marker.style.left = `50%`;
-    marker.style.top = `${game.rope}%`;
-  }
-  
-  const diff = Math.abs(game.rope - 50);
-  pctText.innerText = diff === 0 ? '50' : diff;
-  pctText.style.color = game.rope < 50 ? 'var(--p1)' : (game.rope > 50 ? 'var(--p2)' : '#fff');
-  
-  if(game.rope < 50) {
-    marker.style.boxShadow = '0 0 0 3px rgba(79,70,229,0.3),0 0 30px rgba(79,70,229,0.5)';
-    marker.style.background = 'conic-gradient(from 0deg,#4F46E5,#818CF8,#4F46E5)';
-  } else if (game.rope > 50) {
-    marker.style.boxShadow = '0 0 0 3px rgba(245,158,11,0.3),0 0 30px rgba(245,158,11,0.5)';
-    marker.style.background = 'conic-gradient(from 0deg,#F59E0B,#FCD34D,#F59E0B)';
-  } else {
-    marker.style.boxShadow = '0 0 0 3px rgba(255,255,255,0.1),0 0 15px rgba(255,255,255,0.1)';
-    marker.style.background = '#64748B';
-  }
-}
-
-/* ─────────────────────────────────────────────────────────
-   8. END GAME & ELO
-   ───────────────────────────────────────────────────────── */
-function endMatch() {
-  game.active = false;
-  clearInterval(game.interval);
-  playAudio('sfx-win');
-  
-  let winner = null;
-  let reason = '';
-  
-  if (game.rope <= 0) { winner = 'p1'; reason = 'Knockout!'; }
-  else if (game.rope >= 100) { winner = 'p2'; reason = 'Knockout!'; }
-  else if (game.rope < 50) { winner = 'p1'; reason = 'Tug Advantage!'; }
-  else if (game.rope > 50) { winner = 'p2'; reason = 'Tug Advantage!'; }
-  else {
-    if (game.p1.score > game.p2.score) { winner = 'p1'; reason = 'Score Tiebreaker!'; }
-    else if (game.p2.score > game.p1.score) { winner = 'p2'; reason = 'Score Tiebreaker!'; }
-    else { winner = 'tie'; reason = 'Draw!'; }
-  }
-
-  if (winner !== 'tie') {
-    let wName = game[winner].name;
-    let lName = winner === 'p1' ? game.p2.name : game.p1.name;
-    let ratingDiff = playersDB[lName].rating - playersDB[wName].rating;
-    let wShift = Math.max(10, Math.floor(20 + (ratingDiff * 0.1)));
-    let lShift = Math.max(5, Math.floor(15 + (ratingDiff * 0.1)));
-    
-    playersDB[wName].rating += wShift;
-    playersDB[lName].rating = Math.max(100, playersDB[lName].rating - lShift);
-    playersDB[wName].score += game[winner].score;
-    playersDB[lName].score += game[winner === 'p1' ? 'p2' : 'p1'].score;
-  }
-  
-  saveDB();
-
-  const winScreen = get('screen-winner');
-  winScreen.style.display = 'flex';
-  get('winner-scores').innerText = `${game.p1.score} - ${game.p2.score}`;
-  
-  if (winner === 'tie') {
-    get('winner-name').innerText = 'DRAW';
-    get('winner-name').style.color = '#fff';
-    get('winner-reason').innerText = reason;
-  } else {
-    get('winner-name').innerText = game[winner].name;
-    get('winner-name').style.color = winner === 'p1' ? '#818CF8' : '#FCD34D';
-    get('winner-reason').innerText = reason;
-    confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
-  }
-
-  if (state.isTourney) {
-    const match = tourneyData.bracket[tourneyData.currentRound].find(m => m.id === game.tourneyMatchId);
-    if(match) {
-       match.winner = winner === 'tie' ? match.p1 : game[winner].name; 
-    }
-    
-    get('btn-winner-continue').onclick = () => {
-      winScreen.style.display = 'none';
-      renderBracket();
-      showScreen('screen-tourney-hub');
-    };
-  } else {
-    historyDB.unshift({
-      date: new Date().toLocaleDateString(),
-      p1: game.p1.name, p2: game.p2.name,
-      winner: winner === 'tie' ? 'Draw' : game[winner].name,
-      mode: state.mode
-    });
-    if(historyDB.length > 50) historyDB.pop();
-    saveHistory();
-
-    get('btn-winner-continue').onclick = () => {
-      winScreen.style.display = 'none';
-      showScreen('screen-menu');
-    };
-  }
-}
-
-/* ─────────────────────────────────────────────────────────
-   9. COMPETITION (TOURNAMENT) MODE
-   ───────────────────────────────────────────────────────── */
-let tourneyData = {
-  players: [],
-  bracket: [],
-  currentRound: 0
-};
+/* ─────────────────────────────────────────────────────────────
+   §9  ADMIN / COMPETITION ACCESS
+   ───────────────────────────────────────────────────────────── */
 
 function startCompetitionSetup() {
-  get('modal-admin-pass').classList.add('open');
-  get('admin-pass-input').value = '';
-  get('admin-pass-error').classList.add('hidden');
-  get('admin-pass-input').focus();
+    // Show admin password modal
+    get('admin-pass-input').value = '';
+    get('admin-pass-error').classList.add('hidden');
+    openModal('modal-admin-pass');
+    setTimeout(() => get('admin-pass-input').focus(), 100);
 }
+window.startCompetitionSetup = startCompetitionSetup;
 
 function verifyAdminPass() {
-  const pwd = get('admin-pass-input').value;
-  if (pwd === 'admin' || pwd === '1234') {
-    get('modal-admin-pass').classList.remove('open');
-    state.isTourney = true;
-    tourneyData.players = [];
-    tourneyData.bracket = [];
-    tourneyData.currentRound = 0;
-    updateTPlayerList();
+    const val = get('admin-pass-input').value;
+    if (val === ADMIN_PASSWORD) {
+        get('admin-pass-error').classList.add('hidden');
+        closeModal('modal-admin-pass');
+        get('admin-pass-input').value = '';
+        launchTournamentSetup();
+    } else {
+        get('admin-pass-error').classList.remove('hidden');
+        get('admin-pass-input').value = '';
+        get('admin-pass-input').focus();
+        // Shake the box
+        const box = get('admin-pass-input');
+        box.classList.add('shake');
+        setTimeout(() => box.classList.remove('shake'), 500);
+    }
+}
+window.verifyAdminPass = verifyAdminPass;
+
+function showTeacherLogin() {
+    const pass = prompt('Enter Teacher Password:');
+    if (pass === ADMIN_PASSWORD) {
+        renderTeacherTable();
+        openModal('modal-teacher');
+    } else if (pass !== null) {
+        alert('Incorrect password.');
+    }
+}
+window.showTeacherLogin = showTeacherLogin;
+
+/* ─────────────────────────────────────────────────────────────
+   §10  TOURNAMENT SETUP
+   ───────────────────────────────────────────────────────────── */
+
+function launchTournamentSetup() {
+    STATE.gameType = 'tournament';
+
+    // Check for a saved active tournament
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(ACTIVE_TOUR_KEY)); } catch (e) {}
+    if (saved && saved.bracket && saved.bracket.length > 0) {
+        if (confirm('Resume the active tournament?')) {
+            loadTournament(saved);
+            return;
+        }
+    }
+
+    // Optionally restore last player list
+    const prev = JSON.parse(localStorage.getItem(LAST_PLAYERS_KEY) || '[]');
+    if (prev.length > 0 && confirm(`Reload ${prev.length} students from last session?`)) {
+        STATE.tourney.players = [...prev];
+    } else {
+        STATE.tourney.players = [];
+    }
+
+    STATE.tourney.id = Date.now();
+    updateTourneyPlayerList();
     showScreen('screen-tourney-setup');
-  } else {
-    get('admin-pass-error').classList.remove('hidden');
-  }
+}
+
+function loadTournament(data) {
+    STATE.tourney.players     = data.players || [];
+    STATE.tourney.bracket     = data.bracket || [];
+    STATE.tourney.activeRound = data.activeRound || 0;
+    STATE.tourney.activeMatch = data.activeMatch || 0;
+    STATE.tourney.id          = data.id || Date.now();
+    renderBracket();
+    showScreen('screen-tourney-hub');
 }
 
 function addTourneyPlayer() {
-  const input = get('tourney-input');
-  const name = input.value.trim();
-  if (name && !tourneyData.players.includes(name)) {
-    tourneyData.players.push(name);
-    if(!playersDB[name]) {
-      playersDB[name] = { name, class: 'General', score: 0, correct: 0, total: 0, rating: 1200 };
-      saveDB();
+    const inp  = get('tourney-input');
+    const name = inp.value.trim();
+    if (!name) return;
+    if (STATE.tourney.players.includes(name)) {
+        alert(`"${name}" is already in the list.`);
+        return;
     }
-    input.value = '';
-    updateTPlayerList();
-  }
+    STATE.tourney.players.push(name);
+    inp.value = '';
+    inp.focus();
+    updateTourneyPlayerList();
+    localStorage.setItem(LAST_PLAYERS_KEY, JSON.stringify(STATE.tourney.players));
 }
+window.addTourneyPlayer = addTourneyPlayer;
 
 function clearTPlayers() {
-  tourneyData.players = [];
-  updateTPlayerList();
+    if (!confirm('Remove all players?')) return;
+    STATE.tourney.players = [];
+    updateTourneyPlayerList();
+}
+window.clearTPlayers = clearTPlayers;
+
+function removeTourneyPlayer(index) {
+    STATE.tourney.players.splice(index, 1);
+    updateTourneyPlayerList();
+    localStorage.setItem(LAST_PLAYERS_KEY, JSON.stringify(STATE.tourney.players));
+}
+window.removeTourneyPlayer = removeTourneyPlayer;
+
+function updateTourneyPlayerList() {
+    const count = STATE.tourney.players.length;
+    get('t-player-count').textContent = `${count} Player${count !== 1 ? 's' : ''}`;
+
+    const list = get('t-player-list');
+    if (count === 0) {
+        list.innerHTML = '<li class="text-center text-[var(--muted)] text-sm py-4">No players yet. Add names above.</li>';
+    } else {
+        list.innerHTML = STATE.tourney.players.map((p, i) => `
+            <li class="flex justify-between items-center bg-[var(--surface)] p-2.5 rounded-lg border border-[var(--border)]">
+                <span class="f-display font-bold text-white text-sm">${i + 1}. ${p}</span>
+                <button onclick="removeTourneyPlayer(${i})" class="text-red-400 hover:text-white transition w-6 h-6 flex items-center justify-center">
+                    <i class="fas fa-times text-xs"></i>
+                </button>
+            </li>`).join('');
+    }
+
+    const btn = get('btn-gen-bracket');
+    if (count >= 2) {
+        btn.classList.remove('hidden');
+        btn.textContent = `START BRACKET (${count} Players)`;
+    } else {
+        btn.classList.add('hidden');
+    }
 }
 
-function updateTPlayerList() {
-  const list = get('t-player-list');
-  list.innerHTML = '';
-  tourneyData.players.forEach(p => {
-    const li = document.createElement('li');
-    li.className = 'text-white bg-white/5 px-3 py-2 rounded-lg text-sm font-semibold f-display';
-    li.innerText = p;
-    list.appendChild(li);
-  });
-  get('t-player-count').innerText = `${tourneyData.players.length} Players`;
-  
-  if (tourneyData.players.length >= 2) {
-    get('btn-gen-bracket').classList.remove('hidden');
-  } else {
-    get('btn-gen-bracket').classList.add('hidden');
-  }
-}
+/* ─────────────────────────────────────────────────────────────
+   §11  BRACKET ENGINE
+   ───────────────────────────────────────────────────────────── */
 
 function generateBracket() {
-  let pl = [...tourneyData.players].sort(() => Math.random() - 0.5);
-  tourneyData.bracket = [];
-  tourneyData.currentRound = 0;
-  
-  let round1 = [];
-  let matchId = 1;
-  for (let i = 0; i < pl.length; i += 2) {
-    if (i + 1 < pl.length) {
-      round1.push({ id: matchId++, p1: pl[i], p2: pl[i+1], winner: null });
-    } else {
-      round1.push({ id: matchId++, p1: pl[i], p2: null, winner: pl[i] });
+    let players = [...STATE.tourney.players];
+    if (players.length < 2) return;
+
+    // Smart seeding: highest rated players are spread across the bracket
+    players.sort((a, b) => getPlayerRating(b) - getPlayerRating(a));
+
+    // Pad to next power of 2 with BYEs
+    const size = Math.pow(2, Math.ceil(Math.log2(players.length)));
+    while (players.length < size) players.push('BYE');
+
+    // Build round 1 — top seed vs bottom seed (interleave)
+    const seeded = [];
+    let lo = 0, hi = players.length - 1;
+    while (lo <= hi) {
+        seeded.push(players[lo++]);
+        if (lo <= hi) seeded.push(players[hi--]);
     }
-  }
-  tourneyData.bracket.push(round1);
-  
-  showScreen('screen-tourney-hub');
-  renderBracket();
+
+    STATE.tourney.bracket = [];
+    const round1 = [];
+    for (let i = 0; i < seeded.length; i += 2) {
+        round1.push({ p1: seeded[i], p2: seeded[i + 1], winner: null });
+    }
+    STATE.tourney.bracket.push(round1);
+
+    // Build subsequent empty rounds
+    let prev = round1;
+    while (prev.length > 1) {
+        const nextRound = [];
+        for (let i = 0; i < Math.floor(prev.length / 2); i++) {
+            nextRound.push({ p1: 'TBD', p2: 'TBD', winner: null });
+        }
+        STATE.tourney.bracket.push(nextRound);
+        prev = nextRound;
+    }
+
+    // Auto-resolve BYEs
+    resolveByes();
+    findNextMatch();
+    saveTournament();
+    renderBracket();
+    showScreen('screen-tourney-hub');
 }
+window.generateBracket = generateBracket;
+
+/** Walk round 0 and auto-advance any BYE matches */
+function resolveByes() {
+    STATE.tourney.bracket[0].forEach((match, idx) => {
+        if (match.p2 === 'BYE' && !match.winner) {
+            match.winner = match.p1;
+            forwardWinner(0, idx, match.p1);
+        } else if (match.p1 === 'BYE' && !match.winner) {
+            match.winner = match.p2;
+            forwardWinner(0, idx, match.p2);
+        }
+    });
+}
+
+/** Propagate a winner forward into the next round */
+function forwardWinner(roundIdx, matchIdx, winnerName) {
+    const nextRoundIdx = roundIdx + 1;
+    if (nextRoundIdx >= STATE.tourney.bracket.length) return;
+
+    const nextMatchIdx = Math.floor(matchIdx / 2);
+    const slot = matchIdx % 2 === 0 ? 'p1' : 'p2';
+    const nextMatch = STATE.tourney.bracket[nextRoundIdx][nextMatchIdx];
+
+    nextMatch[slot] = winnerName;
+
+    // If the opposing slot is a BYE, auto-advance again
+    const otherSlot = slot === 'p1' ? 'p2' : 'p1';
+    if (nextMatch[otherSlot] === 'BYE') {
+        nextMatch.winner = winnerName;
+        forwardWinner(nextRoundIdx, nextMatchIdx, winnerName);
+    }
+}
+
+/** Scan the bracket to find the first unplayed but ready match */
+function findNextMatch() {
+    for (let r = 0; r < STATE.tourney.bracket.length; r++) {
+        for (let m = 0; m < STATE.tourney.bracket[r].length; m++) {
+            const match = STATE.tourney.bracket[r][m];
+            const playable = !match.winner
+                && match.p1 !== 'TBD' && match.p2 !== 'TBD'
+                && match.p1 !== 'BYE' && match.p2 !== 'BYE';
+            if (playable) {
+                STATE.tourney.activeRound = r;
+                STATE.tourney.activeMatch = m;
+                return true;
+            }
+        }
+    }
+    STATE.tourney.activeRound = -1;
+    STATE.tourney.activeMatch = -1;
+    return false;
+}
+
+/** Admin can manually select any playable match by clicking its card */
+function setActiveMatch(r, m) {
+    STATE.tourney.activeRound = r;
+    STATE.tourney.activeMatch = m;
+    renderBracket();
+}
+window.setActiveMatch = setActiveMatch;
 
 function renderBracket() {
-  const container = get('bracket-container');
-  container.innerHTML = '';
-  
-  let currentRoundMatches = tourneyData.bracket[tourneyData.currentRound];
-  get('t-round-label').innerText = `ROUND ${tourneyData.currentRound + 1}`;
-  
-  if (currentRoundMatches.every(m => m.winner !== null)) {
-    if (currentRoundMatches.length === 1) {
-      get('match-card-content').innerHTML = `
+    const container = get('bracket-container');
+    container.innerHTML = '';
+
+    STATE.tourney.bracket.forEach((round, rIdx) => {
+        let roundLabel;
+        if (round.length === 1)       roundLabel = '🏆 FINAL';
+        else if (round.length === 2)  roundLabel = 'SEMI-FINAL';
+        else                          roundLabel = `ROUND ${rIdx + 1}`;
+
+        let html = `<div class="mb-5">
+            <h3 class="text-[10px] font-bold text-[var(--muted)] mb-2 uppercase tracking-widest f-display sticky top-0 py-1" style="background:rgba(13,21,39,0.9)">${roundLabel}</h3>
+            <div class="flex flex-col gap-2">`;
+
+        round.forEach((match, mIdx) => {
+            const isActive   = rIdx === STATE.tourney.activeRound && mIdx === STATE.tourney.activeMatch;
+            const isDone     = !!match.winner;
+            const isPlayable = !isDone && match.p1 !== 'TBD' && match.p2 !== 'TBD'
+                               && match.p1 !== 'BYE' && match.p2 !== 'BYE';
+
+            let cardClass = 'bracket-match';
+            if (isActive)        cardClass += ' active';
+            else if (isDone)     cardClass += ' done';
+            else if (isPlayable) cardClass += ' playable';
+
+            const clickAttr = isPlayable
+                ? `onclick="setActiveMatch(${rIdx},${mIdx})" title="Click to select this match"`
+                : '';
+
+            const p1Class = match.winner === match.p1 ? 'bracket-winner-text' : '';
+            const p2Class = match.winner === match.p2 ? 'bracket-winner-text' : '';
+
+            html += `
+                <div class="${cardClass}" ${clickAttr}>
+                    <span class="bracket-player ${p1Class}">${match.p1}</span>
+                    <span class="text-[var(--muted)] text-[10px] font-bold f-display">VS</span>
+                    <span class="bracket-player ${p2Class} text-right">${match.p2}</span>
+                </div>`;
+        });
+
+        html += '</div></div>';
+        container.innerHTML += html;
+    });
+
+    // Render the action card
+    renderMatchCard();
+}
+
+function renderMatchCard() {
+    const card = get('match-card-content');
+    if (STATE.tourney.activeRound === -1) {
+        // Tournament complete
+        const finalMatch = STATE.tourney.bracket[STATE.tourney.bracket.length - 1][0];
+        const champion   = finalMatch.winner;
+        card.innerHTML = `
+            <div class="text-center">
+                <div class="text-[var(--green)] f-display font-bold text-xs uppercase tracking-widest mb-3">Champion</div>
+                <div class="text-5xl mb-3">👑</div>
+                <div class="f-display font-bold text-white text-2xl mb-6">${champion}</div>
+                <button onclick="finishTournament('${champion}')" class="btn-primary w-full">Save & End</button>
+            </div>`;
+        return;
+    }
+
+    const match = STATE.tourney.bracket[STATE.tourney.activeRound][STATE.tourney.activeMatch];
+    const roundNum = STATE.tourney.activeRound + 1;
+    let roundLabel;
+    const totalRounds = STATE.tourney.bracket.length;
+    if (STATE.tourney.activeRound === totalRounds - 1)      roundLabel = '🏆 FINAL';
+    else if (STATE.tourney.activeRound === totalRounds - 2) roundLabel = 'SEMI-FINAL';
+    else                                                    roundLabel = `Round ${roundNum}`;
+
+    card.innerHTML = `
         <div class="text-center">
-          <div class="text-4xl mb-2">🏆</div>
-          <h3 class="text-white font-bold f-display text-2xl">${currentRoundMatches[0].winner}</h3>
-          <p class="text-[var(--muted)] text-xs mt-1">Tournament Champion</p>
-          <button onclick="saveAndExit()" class="btn-primary w-full mt-4 text-sm">Finish</button>
-        </div>
-      `;
-      historyDB.unshift({
-        date: new Date().toLocaleDateString(),
-        p1: 'TOURNAMENT', p2: 'CHAMPION',
-        winner: currentRoundMatches[0].winner,
-        mode: state.mode
-      });
-      saveHistory();
-      return;
-    } else {
-      let nextRound = [];
-      let matchId = Date.now();
-      for (let i = 0; i < currentRoundMatches.length; i += 2) {
-        let p1 = currentRoundMatches[i].winner;
-        let p2 = currentRoundMatches[i+1] ? currentRoundMatches[i+1].winner : null;
-        nextRound.push({ id: matchId++, p1, p2, winner: p2 ? null : p1 });
-      }
-      tourneyData.bracket.push(nextRound);
-      tourneyData.currentRound++;
-      renderBracket();
-      return;
-    }
-  }
-  
-  currentRoundMatches.forEach(m => {
-    const div = document.createElement('div');
-    let isPlayable = !m.winner && m.p1 && m.p2;
-    div.className = `bracket-match mb-2 ${isPlayable ? 'playable' : ''} ${m.winner ? 'done' : ''}`;
-    
-    div.innerHTML = `
-      <div class="flex flex-col gap-1 w-full">
-        <div class="flex justify-between items-center w-full">
-          <span class="bracket-player ${m.winner === m.p1 ? 'text-[var(--green)]' : (m.winner ? 'text-[var(--muted)] line-through' : 'text-white')}">${m.p1}</span>
-        </div>
-        <div class="flex justify-between items-center w-full">
-          <span class="bracket-player ${m.winner === m.p2 ? 'text-[var(--green)]' : (m.winner && m.p2 ? 'text-[var(--muted)] line-through' : (m.p2 ? 'text-white' : 'text-[var(--muted)]'))}">${m.p2 || 'BYE'}</span>
-        </div>
-      </div>
-    `;
-    
-    if (isPlayable) {
-      div.onclick = () => {
-        document.querySelectorAll('.bracket-match').forEach(el => el.classList.remove('active'));
-        div.classList.add('active');
-        showMatchDetails(m);
-      };
-    }
-    container.appendChild(div);
-  });
-  
-  const firstPlayable = currentRoundMatches.find(m => !m.winner && m.p2);
-  if(firstPlayable) showMatchDetails(firstPlayable);
+            <div class="text-[var(--p2)] f-display font-bold text-xs uppercase tracking-widest mb-3 animate-pulse">${roundLabel} · Up Next</div>
+            <div class="f-display font-bold text-3xl text-[#818CF8] mb-2">${match.p1}</div>
+            <div class="text-[var(--muted)] text-xs f-display mb-2">VS</div>
+            <div class="f-display font-bold text-3xl text-[#FCD34D] mb-6">${match.p2}</div>
+            <button onclick="prepareGame('${match.p1}', '${match.p2}')" class="btn-primary w-full">
+                <i class="fas fa-bolt mr-2"></i>START MATCH
+            </button>
+        </div>`;
+
+    // Update round label in header
+    const label = get('t-round-label');
+    if (label) label.textContent = roundLabel;
 }
 
-function showMatchDetails(m) {
-  const card = get('match-card-content');
-  card.innerHTML = `
-    <div class="text-center mb-6">
-      <h3 class="f-display font-bold text-white text-xl">Up Next</h3>
-    </div>
-    <div class="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-[var(--border)] mb-2">
-      <span class="f-display font-bold text-[#818CF8] text-lg">${m.p1}</span>
-      <span class="text-[var(--muted)] text-xs">P1</span>
-    </div>
-    <div class="text-center text-[var(--muted)] f-display font-bold text-sm my-1">VS</div>
-    <div class="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-[var(--border)] mb-6">
-      <span class="f-display font-bold text-[#FCD34D] text-lg">${m.p2}</span>
-      <span class="text-[var(--muted)] text-xs">P2</span>
-    </div>
-    <button onclick="playTourneyMatch(${m.id}, '${m.p1}', '${m.p2}')" class="btn-primary w-full shadow-lg">START MATCH</button>
-  `;
+function handleTournamentWin(winnerName) {
+    const match = STATE.tourney.bracket[STATE.tourney.activeRound][STATE.tourney.activeMatch];
+    match.winner = winnerName;
+    forwardWinner(STATE.tourney.activeRound, STATE.tourney.activeMatch, winnerName);
+    findNextMatch();
+    saveTournament();
+    renderBracket();
+    showScreen('screen-tourney-hub');
 }
 
-function playTourneyMatch(mId, p1Name, p2Name) {
-  game.tourneyMatchId = mId;
-  game.p1.name = p1Name;
-  game.p2.name = p2Name;
-  startBattleGame();
+function saveTournament() {
+    const data = {
+        id:           STATE.tourney.id,
+        players:      STATE.tourney.players,
+        bracket:      STATE.tourney.bracket,
+        activeRound:  STATE.tourney.activeRound,
+        activeMatch:  STATE.tourney.activeMatch,
+    };
+    localStorage.setItem(ACTIVE_TOUR_KEY, JSON.stringify(data));
 }
 
 function saveAndExit() {
-  state.isTourney = false;
-  showScreen('screen-menu');
+    saveTournament();
+    showScreen('screen-menu');
 }
+window.saveAndExit = saveAndExit;
 
-/* ─────────────────────────────────────────────────────────
-   10. TEACHER & HISTORY PANELS
-   ───────────────────────────────────────────────────────── */
-function showTeacherLogin() {
-  get('modal-admin-pass').classList.add('open');
-  get('admin-pass-input').value = '';
-  get('admin-pass-error').classList.add('hidden');
-  
-  const btn = get('modal-admin-pass').querySelector('button.btn-primary');
-  btn.onclick = verifyTeacherPass;
-  get('admin-pass-input').onkeydown = (e) => { if(e.key==='Enter') verifyTeacherPass(); };
+function finishTournament(winner) {
+    const record = {
+        id:       STATE.tourney.id,
+        date:     new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+        time:     new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+        winner:   winner,
+        players:  STATE.tourney.players.length,
+        mode:     STATE.mode,
+    };
+    STATE.history.unshift(record);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(STATE.history));
+    localStorage.removeItem(ACTIVE_TOUR_KEY);
+    showScreen('screen-menu');
 }
+window.finishTournament = finishTournament;
 
-function verifyTeacherPass() {
-  const pwd = get('admin-pass-input').value;
-  if (pwd === 'admin' || pwd === '1234') {
-    get('modal-admin-pass').classList.remove('open');
-    openTeacherPanel();
-  } else {
-    get('admin-pass-error').classList.remove('hidden');
-  }
-}
-
-function openTeacherPanel() {
-  get('modal-teacher').classList.add('open');
-  renderTeacherTable('score'); 
-}
-
-function hideTeacher() {
-  get('modal-teacher').classList.remove('open');
-  const btn = get('modal-admin-pass').querySelector('button.btn-primary');
-  btn.onclick = verifyAdminPass;
-  get('admin-pass-input').onkeydown = (e) => { if(e.key==='Enter') verifyAdminPass(); };
-}
-
-let sortAsc = false;
-function sortTeacherTable(key) {
-  sortAsc = !sortAsc;
-  renderTeacherTable(key, sortAsc);
-}
-
-function renderTeacherTable(sortKey, asc = false) {
-  const tbody = get('teacher-table-body');
-  tbody.innerHTML = '';
-  
-  let pArr = Object.values(playersDB);
-  
-  pArr.sort((a, b) => {
-    let valA = a[sortKey];
-    let valB = b[sortKey];
-    
-    if (sortKey === 'accuracy') {
-      valA = a.total > 0 ? (a.correct / a.total) : 0;
-      valB = b.total > 0 ? (b.correct / b.total) : 0;
-    } else if (sortKey === 'name' || sortKey === 'class') {
-      return asc ? valA.localeCompare(valB) : valB.localeCompare(valA);
-    }
-    
-    return asc ? valA - valB : valB - valA;
-  });
-  
-  pArr.forEach(p => {
-    let acc = p.total > 0 ? Math.round((p.correct / p.total) * 100) : 0;
-    const tr = document.createElement('tr');
-    tr.className = 'hover:bg-white/5 transition';
-    tr.innerHTML = `
-      <td class="p-3 text-white font-semibold">${p.name}</td>
-      <td class="p-3 text-[var(--muted)]">${p.class}</td>
-      <td class="p-3 text-[#FCD34D] f-mono font-bold">${p.score}</td>
-      <td class="p-3 text-[var(--green)]">${acc}%</td>
-      <td class="p-3 text-[#818CF8] f-mono">${p.rating}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-function clearStats() {
-  if(confirm("Are you sure you want to delete all student data? This cannot be undone.")) {
-    playersDB = {};
-    saveDB();
-    renderTeacherTable('score');
-  }
-}
+/* ─────────────────────────────────────────────────────────────
+   §12  HISTORY
+   ───────────────────────────────────────────────────────────── */
 
 function showHistory() {
-  const modal = get('modal-history');
-  const list = get('history-list');
-  list.innerHTML = '';
-  
-  if (historyDB.length === 0) {
-    list.innerHTML = '<p class="text-[var(--muted)] text-sm text-center py-4">No recent matches.</p>';
-  } else {
-    historyDB.forEach(h => {
-      const div = document.createElement('div');
-      div.className = 'bg-[var(--surface)] p-3 rounded-xl border border-[var(--border)] flex justify-between items-center text-sm';
-      div.innerHTML = `
-        <div>
-          <div class="text-[var(--muted)] text-[10px] mb-1">${h.date} · ${h.mode.toUpperCase()}</div>
-          <div class="text-white font-semibold f-display text-base">${h.p1} <span class="text-[var(--muted)] text-xs mx-2">vs</span> ${h.p2}</div>
-        </div>
-        <div class="text-right">
-          <div class="text-[10px] text-[var(--muted)]">WINNER</div>
-          <div class="text-[var(--p2)] font-bold f-display text-base">${h.winner}</div>
-        </div>
-      `;
-      list.appendChild(div);
-    });
-  }
-  
-  modal.classList.add('open');
+    const list = get('history-list');
+    if (STATE.history.length === 0) {
+        list.innerHTML = '<div class="text-[var(--muted)] text-center italic py-4 text-sm">No tournaments recorded yet.</div>';
+    } else {
+        list.innerHTML = STATE.history.map(h => `
+            <div class="bg-[var(--surface)] p-3 rounded-xl border border-[var(--border)] flex items-center justify-between gap-3">
+                <div>
+                    <div class="text-[var(--green)] f-display font-bold">👑 ${h.winner}</div>
+                    <div class="text-xs text-[var(--muted)] mt-0.5">${h.players} players · ${h.mode || 'math'}</div>
+                </div>
+                <div class="text-right text-xs text-[var(--muted)]">
+                    <div>${h.date}</div>
+                    <div>${h.time || ''}</div>
+                </div>
+            </div>`).join('');
+    }
+    openModal('modal-history');
 }
+window.showHistory = showHistory;
 
 function clearHistory() {
-  historyDB = [];
-  saveHistory();
-  showHistory();
+    if (!confirm('Clear all tournament history?')) return;
+    STATE.history = [];
+    localStorage.removeItem(HISTORY_KEY);
+    showHistory();
 }
+window.clearHistory = clearHistory;
+
+/* ─────────────────────────────────────────────────────────────
+   §13  TEACHER DASHBOARD
+   ───────────────────────────────────────────────────────────── */
+
+function updateStats(name, isCorrect, timeTakenMs) {
+    // Do not track placeholder names
+    if (!name || name === '?' || name.startsWith('Player')) return;
+
+    // Merge with student data if available
+    const studentRecord = STATE.students.find(s => s.name === name);
+    if (!STATE.stats[name]) {
+        STATE.stats[name] = {
+            correct: 0, wrong: 0, timeSum: 0,
+            class:    studentRecord ? studentRecord.class    : '?',
+            division: studentRecord ? studentRecord.division : '?',
+            gender:   studentRecord ? studentRecord.gender   : '?',
+        };
+    }
+
+    if (isCorrect) STATE.stats[name].correct++;
+    else           STATE.stats[name].wrong++;
+    STATE.stats[name].timeSum += timeTakenMs;
+
+    localStorage.setItem(STATS_KEY, JSON.stringify(STATE.stats));
+}
+
+/**
+ * Rating formula:
+ *   Accuracy (0–100) × 100  minus  average response time in 10ms units.
+ *   Higher is better. Ensures accuracy is primary, speed is tiebreaker.
+ */
+function getPlayerRating(name) {
+    const s = STATE.stats[name];
+    if (!s) return -Infinity;
+    const total = s.correct + s.wrong;
+    if (total === 0) return -Infinity;
+    const accuracy = (s.correct / total) * 100;
+    const avgTime  = s.timeSum / total;
+    return (accuracy * 100) - (avgTime / 10);
+}
+
+function sortTeacherTable(key) {
+    if (STATE.teacherSort.key === key) {
+        STATE.teacherSort.asc = !STATE.teacherSort.asc;
+    } else {
+        STATE.teacherSort.key = key;
+        STATE.teacherSort.asc = (key === 'name');
+    }
+    renderTeacherTable();
+}
+window.sortTeacherTable = sortTeacherTable;
+
+function renderTeacherTable() {
+    const tbody = get('teacher-table-body');
+    const names = Object.keys(STATE.stats);
+
+    if (names.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-[var(--muted)] text-sm">No data yet. Play some matches!</td></tr>';
+        return;
+    }
+
+    // Sort
+    names.sort((a, b) => {
+        const sA = STATE.stats[a], sB = STATE.stats[b];
+        const tA = sA.correct + sA.wrong, tB = sB.correct + sB.wrong;
+        let vA, vB;
+
+        switch (STATE.teacherSort.key) {
+            case 'name':
+                vA = a.toLowerCase(); vB = b.toLowerCase();
+                break;
+            case 'class':
+                vA = `${sA.class}${sA.division}`; vB = `${sB.class}${sB.division}`;
+                break;
+            case 'score':
+                vA = sA.correct * 10; vB = sB.correct * 10;
+                break;
+            case 'accuracy':
+                vA = tA ? sA.correct / tA : 0;
+                vB = tB ? sB.correct / tB : 0;
+                break;
+            case 'rating':
+            default:
+                vA = getPlayerRating(a); vB = getPlayerRating(b);
+                break;
+        }
+
+        if (vA < vB) return STATE.teacherSort.asc ? -1 : 1;
+        if (vA > vB) return STATE.teacherSort.asc ?  1 : -1;
+        return 0;
+    });
+
+    tbody.innerHTML = names.map(name => {
+        const s     = STATE.stats[name];
+        const total = s.correct + s.wrong;
+        const acc   = total ? Math.round((s.correct / total) * 100) : 0;
+        const rating = getPlayerRating(name);
+        const ratingDisplay = isFinite(rating) ? Math.round(rating) : '-';
+
+        let accColor = 'text-red-400';
+        if (acc > 80) accColor = 'text-[var(--green)]';
+        else if (acc > 55) accColor = 'text-[var(--p2)]';
+
+        return `
+            <tr class="hover:bg-white/3 transition">
+                <td class="p-3 f-display font-bold text-white">${name}</td>
+                <td class="p-3 text-[var(--muted)] text-xs">${s.class}${s.division}</td>
+                <td class="p-3 text-white f-mono">${s.correct * 10}</td>
+                <td class="p-3 ${accColor} font-bold f-display">${acc}%</td>
+                <td class="p-3 f-mono text-xs text-[var(--muted)]">${ratingDisplay}</td>
+            </tr>`;
+    }).join('');
+}
+
+function hideTeacher() { closeModal('modal-teacher'); }
+window.hideTeacher = hideTeacher;
+
+function clearStats() {
+    if (!confirm('Reset ALL student performance data? This cannot be undone.')) return;
+    STATE.stats = {};
+    localStorage.removeItem(STATS_KEY);
+    renderTeacherTable();
+}
+window.clearStats = clearStats;
+
+/* ─────────────────────────────────────────────────────────────
+   §14  GAME LIFECYCLE — PREPARE & COUNTDOWN
+   ───────────────────────────────────────────────────────────── */
+
+/**
+ * Main entry point to start any match (battle or tournament).
+ * Sets up game state, shows the countdown, then starts play.
+ */
+function prepareGame(p1Name, p2Name) {
+    // Stop any running game
+    if (STATE.game.interval) {
+        clearInterval(STATE.game.interval);
+        STATE.game.interval = null;
+    }
+    AUDIO.stopBGM();
+
+    // Determine difficulty from tournament round progression
+    let difficulty = 1;
+    if (STATE.gameType === 'tournament') {
+        const roundsLeft = STATE.tourney.bracket.length - 1 - STATE.tourney.activeRound;
+        if (roundsLeft <= 0)      difficulty = 4; // Final
+        else if (roundsLeft <= 1) difficulty = 3; // Semi
+        else if (roundsLeft <= 2) difficulty = 2; // QF
+        else                      difficulty = 1;
+    }
+
+    // Initialise game state
+    STATE.game.active      = false;
+    STATE.game.timer       = 60;
+    STATE.game.tugValue    = 50;
+    STATE.game.suddenDeath = false;
+    STATE.game.difficulty  = difficulty;
+    STATE.game.p1          = createPlayerState(p1Name);
+    STATE.game.p2          = createPlayerState(p2Name);
+
+    // Layout the zones responsively
+    layoutGameZones();
+
+    // Reset UI
+    resetGameUI();
+
+    showScreen('screen-game');
+    runCountdown();
+}
+window.prepareGame = prepareGame;
+
+/** Creates a fresh per-player state object */
+function createPlayerState(name) {
+    return {
+        name:       name,
+        score:      0,
+        streak:     0,
+        frozen:     false,
+        processing: false,
+        ans:        '',
+        q:          null,
+        wrongTimes: [],     // rolling window of wrong-answer timestamps
+        startTime:  0,      // when the current question appeared
+    };
+}
+
+/** Lay out P1 zone (top/left) and P2 zone (bottom/right) based on screen orientation */
+function layoutGameZones() {
+    const isLandscape = window.innerWidth >= 1024;
+    const zone1 = get('zone-p1');
+    const zone2 = get('zone-p2');
+    const divider = get('rope-divider');
+
+    if (isLandscape) {
+        zone1.style.cssText = 'position:absolute;top:0;left:0;bottom:0;right:50%;';
+        zone2.style.cssText = 'position:absolute;top:0;left:50%;bottom:0;right:0;';
+        divider.className   = 'rope-divider v';
+    } else {
+        zone1.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:50%;';
+        zone2.style.cssText = 'position:absolute;top:50%;left:0;right:0;bottom:0;';
+        divider.className   = 'rope-divider h';
+    }
+}
+
+window.addEventListener('resize', () => {
+    if (STATE.game.active) {
+        layoutGameZones();
+        updateTugVisuals();
+    }
+});
+
+function resetGameUI() {
+    // Player 1
+    const p1 = STATE.game.p1;
+    get('p1-name').textContent  = p1.name;
+    get('p1-score').textContent = '0';
+    get('p1-avatar-txt').textContent = p1.name.charAt(0).toUpperCase();
+    get('p1-input').textContent = '';
+    get('p1-combo').style.display = 'none';
+    get('p1-frozen').style.display = 'none';
+    get('p1-q-text').textContent = '…';
+    get('p1-eng-opts').classList.add('hidden');
+    clearFeedback('p1');
+
+    // Player 2
+    const p2 = STATE.game.p2;
+    get('p2-name').textContent  = p2.name;
+    get('p2-score').textContent = '0';
+    get('p2-avatar-txt').textContent = p2.name.charAt(0).toUpperCase();
+    get('p2-input').textContent = '';
+    get('p2-combo').style.display = 'none';
+    get('p2-frozen').style.display = 'none';
+    get('p2-q-text').textContent = '…';
+    get('p2-eng-opts').classList.add('hidden');
+    clearFeedback('p2');
+
+    // Timer
+    get('game-timer').textContent = '60';
+    const pill = get('timer-pill');
+    pill.classList.remove('danger', 'sd');
+
+    // Tug marker
+    updateTugVisuals();
+
+    // Hide winner screen
+    get('screen-winner').style.display = 'none';
+}
+
+function clearFeedback(player) {
+    const fb = get(`${player}-feedback`);
+    if (fb) {
+        fb.textContent = '';
+        fb.style.opacity = '0';
+    }
+}
+
+function runCountdown() {
+    const overlay = get('countdown-overlay');
+    const text    = get('countdown-text');
+    overlay.style.display = 'flex';
+
+    let count = 3;
+    text.textContent = count;
+    text.className   = 'countdown-num';
+    AUDIO.playCountdown();
+
+    const tick = setInterval(() => {
+        count--;
+        if (count > 0) {
+            text.textContent = count;
+            text.className   = 'countdown-num';
+        } else if (count === 0) {
+            text.textContent = 'FIGHT!';
+            text.className   = 'countdown-fight';
+            AUDIO.playWin();
+        } else {
+            clearInterval(tick);
+            overlay.style.display = 'none';
+            startGame();
+        }
+    }, COUNTDOWN_TICK_MS);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §15  GAME TICK & SUDDEN DEATH
+   ───────────────────────────────────────────────────────────── */
+
+function startGame() {
+    STATE.game.active = true;
+    AUDIO.playBGM();
+    generateQuestion('p1');
+    generateQuestion('p2');
+    STATE.game.interval = setInterval(gameTick, 1000);
+}
+
+function gameTick() {
+    if (!STATE.game.active) return;
+
+    STATE.game.timer--;
+    const timerEl = get('game-timer');
+    const pill    = get('timer-pill');
+
+    if (STATE.game.suddenDeath) {
+        timerEl.textContent = 'SD!';
+        pill.classList.add('sd');
+    } else {
+        timerEl.textContent = STATE.game.timer;
+        if (STATE.game.timer <= 10) {
+            pill.classList.add('danger');
+        }
+
+        // Ramp difficulty every N seconds (capped at 5)
+        if (STATE.game.timer > 0
+            && STATE.game.timer % DIFFICULTY_RAMP_INTERVAL === 0
+            && STATE.game.difficulty < 5) {
+            STATE.game.difficulty++;
+        }
+
+        if (STATE.game.timer <= 0) {
+            if (STATE.game.tugValue === 50) {
+                // Dead heat — trigger Sudden Death
+                triggerSuddenDeath();
+            } else {
+                endGame('TIME_UP');
+            }
+        }
+    }
+}
+
+function triggerSuddenDeath() {
+    STATE.game.suddenDeath = true;
+    STATE.game.timer = 9999; // effectively infinite
+
+    AUDIO.playWrong();
+
+    // Show brief SD overlay
+    const overlay = get('countdown-overlay');
+    const text    = get('countdown-text');
+    overlay.style.display = 'flex';
+    text.textContent = 'SUDDEN DEATH!';
+    text.className   = 'countdown-fight';
+    setTimeout(() => { overlay.style.display = 'none'; }, 1800);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §16  QUESTION ENGINE
+   ───────────────────────────────────────────────────────────── */
+
+// English fill-in-the-blank word bank
+const ENG_WORDS = [
+    { f:'APPLE',  m:'A_PLE',  a:2, o:['R','P','S'] },
+    { f:'TIGER',  m:'TI_ER',  a:3, o:['A','I','G'] },
+    { f:'HOUSE',  m:'HO_SE',  a:1, o:['U','A','E'] },
+    { f:'WATER',  m:'WA_ER',  a:3, o:['P','D','T'] },
+    { f:'ROBOT',  m:'ROB_T',  a:3, o:['A','I','O'] },
+    { f:'MUSIC',  m:'MUS_C',  a:2, o:['K','I','E'] },
+    { f:'PHONE',  m:'PH_NE',  a:3, o:['A','U','O'] },
+    { f:'EARTH',  m:'E_RTH',  a:1, o:['A','O','U'] },
+    { f:'MONEY',  m:'MON_Y',  a:2, o:['I','E','A'] },
+    { f:'RIVER',  m:'RIV_R',  a:2, o:['A','E','I'] },
+    { f:'STONE',  m:'ST_NE',  a:2, o:['A','O','I'] },
+    { f:'HAPPY',  m:'HA_PY',  a:1, o:['P','B','D'] },
+    { f:'GREEN',  m:'GR_EN',  a:3, o:['I','A','E'] },
+    { f:'NIGHT',  m:'NI_HT',  a:1, o:['G','F','H'] },
+    { f:'PIZZA',  m:'PI_ZA',  a:2, o:['S','Z','X'] },
+    { f:'TRAIN',  m:'TR_IN',  a:2, o:['E','A','I'] },
+    { f:'GHOST',  m:'GH_ST',  a:3, o:['A','I','O'] },
+    { f:'MOUSE',  m:'MO_SE',  a:2, o:['O','U','A'] },
+    { f:'CLOCK',  m:'CL_CK',  a:2, o:['A','O','U'] },
+    { f:'SPACE',  m:'SP_CE',  a:3, o:['E','I','A'] },
+    { f:'WORLD',  m:'WO_LD',  a:1, o:['R','L','D'] },
+    { f:'TABLE',  m:'TA_LE',  a:2, o:['P','B','D'] },
+    { f:'FLOOR',  m:'FL_OR',  a:2, o:['A','O','U'] },
+    { f:'SHOES',  m:'SH_ES',  a:1, o:['O','A','I'] },
+    { f:'FRUIT',  m:'FR_IT',  a:3, o:['O','I','U'] },
+    { f:'GRAPE',  m:'GR_PE',  a:3, o:['E','I','A'] },
+    { f:'BREAD',  m:'BR_AD',  a:3, o:['E','I','O'] },
+    { f:'CLOUD',  m:'CL_UD',  a:3, o:['O','A','U'] },
+    { f:'DREAM',  m:'DR_AM',  a:3, o:['E','A','I'] },
+    { f:'FLAME',  m:'FL_ME',  a:3, o:['A','O','I'] },
+    { f:'GLOBE',  m:'GL_BE',  a:3, o:['O','A','I'] },
+    { f:'PLANT',  m:'PL_NT',  a:3, o:['A','O','I'] },
+    { f:'SMILE',  m:'SM_LE',  a:2, o:['I','O','A'] },
+    { f:'STORM',  m:'ST_RM',  a:3, o:['O','A','U'] },
+    { f:'SWORD',  m:'SW_RD',  a:3, o:['O','A','U'] },
+    { f:'TOWER',  m:'T_WER',  a:1, o:['O','A','E'] },
+    { f:'TRIBE',  m:'TR_BE',  a:2, o:['I','A','O'] },
+    { f:'VOICE',  m:'VO_CE',  a:2, o:['I','A','O'] },
+    { f:'WHEEL',  m:'WH_EL',  a:3, o:['E','A','O'] },
+    { f:'YOUTH',  m:'Y_UTH',  a:1, o:['O','A','U'] },
+];
+
+function rand(n) { return Math.floor(Math.random() * n) + 1; }
+
+function generateQuestion(player) {
+    const diff = STATE.game.difficulty;
+    let q;
+
+    if (STATE.mode === 'math') {
+        q = generateMathQuestion(diff);
+    } else {
+        q = generateEnglishQuestion();
+    }
+
+    STATE.game[player].q         = q;
+    STATE.game[player].startTime = Date.now();
+    STATE.game[player].ans       = '';
+    renderQuestion(player, q);
+}
+
+function generateMathQuestion(diff) {
+    const r = Math.random();
+    let a, b, op, ans;
+
+    if (diff === 1) {
+        // Simple add/subtract within 20
+        if (r > 0.5) { a = rand(10); b = rand(10); op = '+'; ans = a + b; }
+        else         { a = rand(15) + 3; b = rand(a); op = '−'; ans = a - b; }
+
+    } else if (diff === 2) {
+        // Add/subtract within 50, or easy multiply
+        if (r > 0.55) { a = rand(9) + 1; b = rand(9) + 1; op = '×'; ans = a * b; }
+        else          { a = rand(40) + 5; b = rand(30) + 5; op = '+'; ans = a + b; }
+
+    } else if (diff === 3) {
+        // Mix of operations
+        if (r < 0.3)       { b = rand(8) + 2; a = b * (rand(9) + 1); op = '÷'; ans = a / b; }
+        else if (r < 0.6)  { a = rand(12) + 2; b = rand(12) + 2; op = '×'; ans = a * b; }
+        else               { a = rand(60) + 10; b = rand(50) + 10; op = '−'; ans = a - b; }
+
+    } else if (diff === 4) {
+        // Harder — bigger numbers
+        if (r < 0.35)      { b = rand(11) + 2; a = b * (rand(11) + 2); op = '÷'; ans = a / b; }
+        else if (r < 0.65) { a = rand(15) + 3; b = rand(15) + 3; op = '×'; ans = a * b; }
+        else               { a = rand(99) + 20; b = rand(80) + 10; op = '+'; ans = a + b; }
+
+    } else {
+        // Difficulty 5 — large multiply / divide / compound
+        if (r < 0.4) { a = rand(20) + 5; b = rand(20) + 5; op = '×'; ans = a * b; }
+        else         { a = rand(150) + 50; b = rand(100) + 20; op = '+'; ans = a + b; }
+    }
+
+    return { type: 'math', text: `${a} ${op} ${b}`, ans: ans };
+}
+
+function generateEnglishQuestion() {
+    const word = ENG_WORDS[Math.floor(Math.random() * ENG_WORDS.length)];
+    return { type: 'eng', text: word.m, ans: word.a, opts: word.o };
+}
+
+function renderQuestion(player, q) {
+    get(`${player}-q-text`).textContent = q.text;
+    get(`${player}-input`).textContent  = '';
+
+    const optsEl = get(`${player}-eng-opts`);
+    if (q.type === 'eng') {
+        optsEl.classList.remove('hidden');
+        const colorClass = player === 'p1' ? 'eng-opt-p1' : 'eng-opt-p2';
+        optsEl.innerHTML = q.opts.map((opt, i) => `
+            <div class="eng-opt ${colorClass}" onclick="tapInput('${player}','${i + 1}')">
+                <span class="text-[var(--muted)] text-[10px]">${i + 1}.</span> ${opt}
+            </div>`).join('');
+    } else {
+        optsEl.classList.add('hidden');
+    }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §17  INPUT HANDLING & VALIDATION
+   ───────────────────────────────────────────────────────────── */
+
+// Global keyboard listener (active only during game)
+document.addEventListener('keydown', (e) => {
+    if (!STATE.game.active) return;
+
+    const k = e.key;
+
+    // P1 uses: digit row 1-0 + S to clear
+    // P2 uses: numpad 0-9 + Backspace to clear
+    const isDigit    = /^[0-9]$/.test(k);
+    const isNumpad   = e.code.startsWith('Numpad') && isDigit;
+    const isTopRow   = e.code.startsWith('Digit') && isDigit;
+
+    if (isTopRow && !STATE.game.p1.frozen)  handleInput('p1', k);
+    if (e.code === 'KeyS')                  clearInput('p1');
+
+    if (isNumpad && !STATE.game.p2.frozen)  handleInput('p2', k);
+    if (e.code === 'Backspace')             clearInput('p2');
+});
+
+function tapInput(player, char) {
+    if (!STATE.game.active) return;
+    if (STATE.game[player].frozen) return;
+    handleInput(player, char);
+}
+window.tapInput = tapInput;
+
+function tapClear(player) {
+    if (!STATE.game.active) return;
+    clearInput(player);
+}
+window.tapClear = tapClear;
+
+function handleInput(player, char) {
+    const ps = STATE.game[player];
+    if (ps.frozen || ps.processing) return;
+    const q = ps.q;
+    if (!q) return;
+
+    ps.ans += char;
+    get(`${player}-input`).textContent = ps.ans;
+
+    const expectedLength = q.ans.toString().length;
+    if (ps.ans.length >= expectedLength) {
+        ps.processing = true;
+        // Small delay so the last character is visible
+        setTimeout(() => validate(player), 60);
+    }
+}
+
+function clearInput(player) {
+    STATE.game[player].ans = '';
+    get(`${player}-input`).textContent = '';
+}
+
+function validate(player) {
+    const ps      = STATE.game[player];
+    const given   = parseInt(ps.ans, 10);
+    const correct = ps.q.ans;
+    const elapsed = Date.now() - ps.startTime;
+
+    if (given === correct) {
+        onCorrectAnswer(player, elapsed);
+    } else {
+        onWrongAnswer(player, elapsed);
+    }
+
+    // Clear answer display after validation
+    setTimeout(() => {
+        ps.processing = false;
+        clearInput(player);
+        generateQuestion(player);
+    }, FEEDBACK_VISIBLE_MS);
+}
+
+function onCorrectAnswer(player, elapsed) {
+    const ps = STATE.game[player];
+    ps.score++;
+    ps.streak++;
+    updateStats(ps.name, true, elapsed);
+
+    get(`${player}-score`).textContent = ps.score;
+    AUDIO.playCorrect();
+
+    // Feedback flash
+    flashFeedback(`${player}-feedback`, '+GOOD', 'feedback-flash text-[var(--green)]');
+
+    // Streak combo banner
+    if (ps.streak >= 3) {
+        get(`${player}-combo`).style.display = 'inline-flex';
+    }
+
+    // Power = how much the rope moves
+    let power = 8;
+    if (ps.streak >= 3) power = 14;
+    if (ps.streak >= 6) power = 18;
+
+    // Rubber-banding: bonus power if the player is far behind
+    if (player === 'p1' && STATE.game.tugValue > 72) power += 6;
+    if (player === 'p2' && STATE.game.tugValue < 28) power += 6;
+
+    // Camera shake for big moves
+    if (power > 12) {
+        document.body.classList.add('shake');
+        setTimeout(() => document.body.classList.remove('shake'), 450);
+    }
+
+    moveTug(player, power);
+}
+
+function onWrongAnswer(player, elapsed) {
+    const ps   = STATE.game[player];
+    const opp  = player === 'p1' ? 'p2' : 'p1';
+
+    ps.streak = 0;
+    get(`${player}-combo`).style.display = 'none';
+    updateStats(ps.name, false, elapsed);
+
+    AUDIO.playWrong();
+    flashFeedback(`${player}-feedback`, 'MISS', 'feedback-flash text-[var(--red)]');
+
+    // Wrong answer gives opponent a small bonus pull
+    moveTug(opp, 4);
+
+    // Anti-spam: 3 wrong answers within WRONG_SPAM_WINDOW_MS → freeze
+    const now = Date.now();
+    ps.wrongTimes.push(now);
+    // Keep only the last N
+    if (ps.wrongTimes.length > WRONG_SPAM_COUNT) ps.wrongTimes.shift();
+
+    if (ps.wrongTimes.length === WRONG_SPAM_COUNT) {
+        const window = ps.wrongTimes[WRONG_SPAM_COUNT - 1] - ps.wrongTimes[0];
+        if (window < WRONG_SPAM_WINDOW_MS) {
+            freezePlayer(player);
+            ps.wrongTimes = [];
+        }
+    }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §18  TUG-OF-WAR PHYSICS & VISUALS
+   ───────────────────────────────────────────────────────────── */
+
+function moveTug(puller, amount) {
+    if (puller === 'p1') STATE.game.tugValue -= amount;
+    else                 STATE.game.tugValue += amount;
+
+    // Clamp
+    STATE.game.tugValue = Math.max(0, Math.min(TUG_WIN_THRESHOLD, STATE.game.tugValue));
+
+    updateTugVisuals();
+
+    // Check win condition
+    if (STATE.game.tugValue <= 0)                   endGame('P1_WIN');
+    else if (STATE.game.tugValue >= TUG_WIN_THRESHOLD) endGame('P2_WIN');
+}
+
+function updateTugVisuals() {
+    const tug    = STATE.game.tugValue;   // 0–100
+    const marker = get('rope-marker');
+    const pctEl  = get('rope-pct');
+    if (!marker) return;
+
+    // Zone zones colour tint based on who's winning
+    const zone1 = get('zone-p1');
+    const zone2 = get('zone-p2');
+
+    if (zone1 && zone2) {
+        if (tug < 40) {
+            // P1 dominating
+            zone1.style.background = 'radial-gradient(ellipse 80% 60% at 50% 120%, rgba(79,70,229,0.18) 0%, transparent 70%)';
+            zone2.style.background = 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(245,158,11,0.04) 0%, transparent 70%)';
+        } else if (tug > 60) {
+            // P2 dominating
+            zone1.style.background = 'radial-gradient(ellipse 80% 60% at 50% 120%, rgba(79,70,229,0.04) 0%, transparent 70%)';
+            zone2.style.background = 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(245,158,11,0.18) 0%, transparent 70%)';
+        } else {
+            zone1.style.background = 'radial-gradient(ellipse 80% 60% at 50% 120%, rgba(79,70,229,0.08) 0%, transparent 70%)';
+            zone2.style.background = 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(245,158,11,0.08) 0%, transparent 70%)';
+        }
+    }
+
+    // Move the rope marker
+    // tug=50 → centre, tug=0 → P1 side, tug=100 → P2 side
+    // We map tug into a ±45% offset
+    const offset = (tug - 50) * 0.9; // ±45
+    const isLandscape = window.innerWidth >= 1024;
+
+    // Marker sits at the centre of the divider line
+    if (isLandscape) {
+        // Divider is vertical (left: 50%), marker moves along X axis
+        marker.style.left = '50%';
+        marker.style.top  = '50%';
+        marker.style.transform = `translate(calc(-50% + ${offset}vw), -50%)`;
+    } else {
+        // Divider is horizontal (top: 50%), marker moves along Y axis
+        marker.style.left = '50%';
+        marker.style.top  = '50%';
+        marker.style.transform = `translate(-50%, calc(-50% + ${offset}vh))`;
+    }
+
+    // Update inner percentage display
+    if (pctEl) pctEl.textContent = Math.round(tug);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §19  FREEZE MECHANIC
+   ───────────────────────────────────────────────────────────── */
+
+function freezePlayer(player) {
+    const ps = STATE.game[player];
+    ps.frozen = true;
+
+    const overlay = get(`${player}-frozen`);
+    overlay.style.display = 'flex';
+
+    setTimeout(() => {
+        ps.frozen = false;
+        overlay.style.display = 'none';
+    }, FREEZE_DURATION_MS);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §20  GAME END & WINNER SCREEN
+   ───────────────────────────────────────────────────────────── */
+
+function endGame(reason) {
+    if (!STATE.game.active) return;  // Guard against double-call
+    STATE.game.active = false;
+
+    clearInterval(STATE.game.interval);
+    STATE.game.interval = null;
+    AUDIO.stopBGM();
+
+    const p1 = STATE.game.p1;
+    const p2 = STATE.game.p2;
+
+    let winnerName, winReason;
+
+    switch (reason) {
+        case 'P1_WIN':
+            winnerName = p1.name;
+            winReason  = 'Knockout! Pulled to victory.';
+            break;
+        case 'P2_WIN':
+            winnerName = p2.name;
+            winReason  = 'Knockout! Pulled to victory.';
+            break;
+        case 'TIME_UP':
+            if (STATE.game.tugValue < 50) {
+                winnerName = p1.name;
+                winReason  = "Time's up — P1 had the edge!";
+            } else if (STATE.game.tugValue > 50) {
+                winnerName = p2.name;
+                winReason  = "Time's up — P2 had the edge!";
+            } else {
+                winnerName = 'DRAW';
+                winReason  = 'Perfect tie — no winner!';
+            }
+            break;
+        default:
+            winnerName = reason;
+            winReason  = STATE.game.suddenDeath ? 'Sudden Death Victory!' : 'Victory!';
+    }
+
+    // Show winner screen
+    AUDIO.playWin();
+    if (winnerName !== 'DRAW') {
+        confetti({ particleCount: 220, spread: 110, origin: { y: 0.6 }, colors: ['#4F46E5','#F59E0B','#10B981','#fff'] });
+    }
+
+    get('winner-name').textContent   = winnerName;
+    get('winner-reason').textContent = winReason;
+    get('winner-scores').textContent = `${p1.score * 10} – ${p2.score * 10}`;
+
+    const winnerScreen = get('screen-winner');
+    winnerScreen.style.display = 'flex';
+
+    // Wire the Continue button
+    get('btn-winner-continue').onclick = () => {
+        winnerScreen.style.display = 'none';
+        if (STATE.gameType === 'tournament') {
+            handleTournamentWin(winnerName);
+        } else {
+            showScreen('screen-menu');
+        }
+    };
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §21  STATS — LOAD FROM STORAGE
+   ───────────────────────────────────────────────────────────── */
+
+function loadPersistedState() {
+    try {
+        const stats   = localStorage.getItem(STATS_KEY);
+        const history = localStorage.getItem(HISTORY_KEY);
+        if (stats)   STATE.stats   = JSON.parse(stats);
+        if (history) STATE.history = JSON.parse(history);
+    } catch (e) {
+        console.warn('Could not load persisted state:', e);
+    }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §22  RESPONSIVE ROPE MARKER POSITIONING
+           (recalculate on first paint and on resize)
+   ───────────────────────────────────────────────────────────── */
+
+function positionRopeMarker() {
+    // Marker starts at true center
+    const marker = get('rope-marker');
+    if (!marker) return;
+    marker.style.left = '50%';
+    marker.style.top  = '50%';
+    marker.style.transform = 'translate(-50%, -50%)';
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §23  CLOSE AUTOCOMPLETE ON OUTSIDE CLICK
+   ───────────────────────────────────────────────────────────── */
+
+document.addEventListener('click', (e) => {
+    // Close P1 autocomplete
+    const p1wrap = document.querySelector('#screen-battle-entry .name-input-wrap:nth-of-type(1)');
+    if (p1wrap && !p1wrap.contains(e.target)) closeAutocomplete('p1');
+
+    // Close P2 autocomplete
+    const p2wrap = document.querySelector('#screen-battle-entry .name-input-wrap:nth-of-type(2)');
+    if (p2wrap && !p2wrap.contains(e.target)) closeAutocomplete('p2');
+});
+
+/* ─────────────────────────────────────────────────────────────
+   §24  INITIALISATION  (runs on DOMContentLoaded)
+   ───────────────────────────────────────────────────────────── */
+
+document.addEventListener('DOMContentLoaded', async () => {
+    // 1. Boot audio engine
+    AUDIO.init();
+
+    // 2. Load persisted stats & history
+    loadPersistedState();
+
+    // 3. Load student database
+    await loadStudents();
+
+    // 4. Initialise mode buttons
+    initModeButtons();
+
+    // 5. Position rope marker at centre
+    positionRopeMarker();
+
+    // 6. Decide entry point: setup wizard or menu
+    runSetup(false);
+});
+
+/* ─────────────────────────────────────────────────────────────
+   §25  MISC GLOBAL EXPORTS
+        (functions referenced directly from inline HTML onclick)
+   ───────────────────────────────────────────────────────────── */
+
+window.setGameMode          = setGameMode;
+window.setupBattleMode      = setupBattleMode;
+window.startCompetitionSetup= startCompetitionSetup;
+window.showHistory          = showHistory;
+window.runSetup             = runSetup;
+window.skipSetup            = skipSetup;
+window.verifyAdminPass      = verifyAdminPass;
+window.showTeacherLogin     = showTeacherLogin;
+window.sortTeacherTable     = sortTeacherTable;
+window.hideTeacher          = hideTeacher;
+window.clearStats           = clearStats;
+window.clearHistory         = clearHistory;
+window.addTourneyPlayer     = addTourneyPlayer;
+window.clearTPlayers        = clearTPlayers;
+window.removeTourneyPlayer  = removeTourneyPlayer;
+window.generateBracket      = generateBracket;
+window.setActiveMatch       = setActiveMatch;
+window.saveAndExit          = saveAndExit;
+window.finishTournament     = finishTournament;
+window.tapInput             = tapInput;
+window.tapClear             = tapClear;
+window.toggleMute           = toggleMute;
+window.onNameInput          = onNameInput;
+window.onNameKeydown        = onNameKeydown;
+window.selectStudent        = selectStudent;
+window.clearPlayerSelection = clearPlayerSelection;
+window.startBattleGame      = startBattleGame;
+window.prepareGame          = prepareGame;
