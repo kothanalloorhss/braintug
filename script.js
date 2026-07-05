@@ -1576,5 +1576,724 @@ function renderTeacherTable() {
         const p   = STATE.profiles[sid];
         const avg = getOverallLevel(sid);
 
+
         // Colour-code each level cell
-        function levelCe
+        function levelCell(lvl) {
+            if (lvl === null || lvl === undefined)
+                return `<td class="p-3 text-[var(--muted)] text-center f-mono">—</td>`;
+            if (lvl === 0)
+                return `<td class="p-3 text-center bg-red-900/30 text-red-400 font-bold f-mono">FAIL</td>`;
+            const color = lvl >= 3 ? 'text-[var(--green)]' : lvl >= 2 ? 'text-[var(--p2)]' : 'text-white';
+            return `<td class="p-3 text-center ${color} font-bold f-mono">L${lvl}</td>`;
+        }
+
+        // Row background based on overall level
+        let rowBg = '';
+        if (avg === 0 && [p.addition_level, p.subtraction_level, p.multiplication_level, p.division_level].some(v => v === 0))
+            rowBg = 'bg-red-900/10';
+        else if (avg >= 2.5)
+            rowBg = 'bg-green-900/10';
+
+        const total    = (p.match_correct || 0) + (p.match_wrong || 0);
+        const matchAcc = total > 0 ? Math.round((p.match_correct || 0) / total * 100) + '%' : '—';
+
+        return `<tr class="hover:bg-white/3 transition ${rowBg}">
+            <td class="p-3 f-display font-bold text-white whitespace-nowrap">${p.name}</td>
+            <td class="p-3 text-[var(--muted)] text-xs text-center">${p.class_val}${p.division}</td>
+            ${levelCell(p.addition_level)}
+            ${levelCell(p.subtraction_level)}
+            ${levelCell(p.multiplication_level)}
+            ${levelCell(p.division_level)}
+            <td class="p-3 f-mono text-xs text-center text-[var(--muted)]">${avg > 0 ? avg.toFixed(1) : '—'}</td>
+            <td class="p-3 f-mono text-xs text-center text-[var(--muted)]">${matchAcc}</td>
+        </tr>`;
+    }).join('');
+}
+
+function hideTeacher() { closeModal('modal-teacher'); }
+window.hideTeacher = hideTeacher;
+
+function clearStats() {
+    if (!confirm('Reset ALL student assessment & performance data? This cannot be undone.')) return;
+    STATE.profiles = {};
+    localStorage.removeItem(PROFILES_KEY);
+    renderTeacherTable();
+}
+window.clearStats = clearStats;
+
+/**
+ * Export all profile data as a .json file via Blob download.
+ */
+function exportProfiles() {
+    const data    = JSON.stringify(STATE.profiles, null, 2);
+    const blob    = new Blob([data], { type: 'application/json' });
+    const url     = URL.createObjectURL(blob);
+    const a       = document.createElement('a');
+    a.href        = url;
+    a.download    = `braintug_profiles_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+window.exportProfiles = exportProfiles;
+
+/* ─────────────────────────────────────────────────────────────
+   §18  GAME LIFECYCLE — PREPARE & COUNTDOWN
+   ───────────────────────────────────────────────────────────── */
+
+function prepareGame(p1Name, p2Name) {
+    if (STATE.game.interval) { clearInterval(STATE.game.interval); STATE.game.interval = null; }
+    AUDIO.stopBGM();
+
+    // Difficulty scales with tournament round
+    let difficulty = 1;
+    if (STATE.gameType === 'tournament') {
+        const roundsLeft = STATE.tourney.bracket.length - 1 - STATE.tourney.activeRound;
+        if (roundsLeft <= 0)      difficulty = 4;
+        else if (roundsLeft <= 1) difficulty = 3;
+        else if (roundsLeft <= 2) difficulty = 2;
+    }
+
+    STATE.game.active      = false;
+    STATE.game.timer       = 60;
+    STATE.game.tugValue    = 50;
+    STATE.game.suddenDeath = false;
+    STATE.game.difficulty  = difficulty;
+    STATE.game.p1          = createPlayerState(p1Name);
+    STATE.game.p2          = createPlayerState(p2Name);
+
+    layoutGameZones();
+    resetGameUI();
+    showScreen('screen-game');
+    runCountdown();
+}
+window.prepareGame = prepareGame;
+
+function createPlayerState(name) {
+    return {
+        name, score: 0, streak: 0, frozen: false,
+        processing: false, ans: '', q: null,
+        wrongTimes: [], startTime: 0
+    };
+}
+
+function layoutGameZones() {
+    const isLandscape = window.innerWidth >= 1024;
+    const zone1   = get('zone-p1');
+    const zone2   = get('zone-p2');
+    const divider = get('rope-divider');
+    if (isLandscape) {
+        if (zone1)   zone1.style.cssText   = 'position:absolute;top:0;left:0;bottom:0;right:50%;';
+        if (zone2)   zone2.style.cssText   = 'position:absolute;top:0;left:50%;bottom:0;right:0;';
+        if (divider) divider.className     = 'rope-divider v';
+    } else {
+        if (zone1)   zone1.style.cssText   = 'position:absolute;top:0;left:0;right:0;bottom:50%;';
+        if (zone2)   zone2.style.cssText   = 'position:absolute;top:50%;left:0;right:0;bottom:0;';
+        if (divider) divider.className     = 'rope-divider h';
+    }
+}
+
+window.addEventListener('resize', () => {
+    if (STATE.game.active) { layoutGameZones(); updateTugVisuals(); }
+});
+
+function resetGameUI() {
+    const p1 = STATE.game.p1, p2 = STATE.game.p2;
+
+    // Player 1
+    const p1name  = get('p1-name');    if (p1name)  p1name.textContent  = p1.name;
+    const p1score = get('p1-score');   if (p1score) p1score.textContent = '0';
+    const p1av    = get('p1-avatar-txt'); if (p1av) p1av.textContent    = p1.name.charAt(0).toUpperCase();
+
+    // Player 2
+    const p2name  = get('p2-name');    if (p2name)  p2name.textContent  = p2.name;
+    const p2score = get('p2-score');   if (p2score) p2score.textContent = '0';
+    const p2av    = get('p2-avatar-txt'); if (p2av) p2av.textContent    = p2.name.charAt(0).toUpperCase();
+
+    ['p1', 'p2'].forEach(pl => {
+        const inp   = get(`${pl}-input`);    if (inp)   inp.textContent    = '';
+        const combo = get(`${pl}-combo`);    if (combo) combo.style.display = 'none';
+        const froz  = get(`${pl}-frozen`);   if (froz)  froz.style.display = 'none';
+        const qtxt  = get(`${pl}-q-text`);   if (qtxt)  qtxt.textContent   = '…';
+        const opts  = get(`${pl}-eng-opts`); if (opts)  opts.classList.add('hidden');
+        clearFeedback(pl);
+    });
+
+    const pill = get('timer-pill');
+    if (pill) pill.classList.remove('danger', 'sd');
+    const timerEl = get('game-timer');
+    if (timerEl) timerEl.textContent = '60';
+
+    const ws = get('screen-winner');
+    if (ws) ws.style.display = 'none';
+
+    updateTugVisuals();
+}
+
+function clearFeedback(player) {
+    const fb = get(`${player}-feedback`);
+    if (fb) { fb.textContent = ''; fb.style.opacity = '0'; }
+}
+
+function runCountdown() {
+    const overlay = get('countdown-overlay');
+    const text    = get('countdown-text');
+    if (overlay) overlay.style.display = 'flex';
+    let count = 3;
+    if (text) { text.textContent = count; text.className = 'countdown-num'; }
+    AUDIO.playCountdown();
+
+    const tick = setInterval(() => {
+        count--;
+        if (count > 0) {
+            if (text) { text.textContent = count; text.className = 'countdown-num'; }
+        } else if (count === 0) {
+            if (text) { text.textContent = 'FIGHT!'; text.className = 'countdown-fight'; }
+            AUDIO.playWin();
+        } else {
+            clearInterval(tick);
+            if (overlay) overlay.style.display = 'none';
+            startGame();
+        }
+    }, COUNTDOWN_TICK_MS);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §19  GAME TICK & SUDDEN DEATH
+   ───────────────────────────────────────────────────────────── */
+
+function startGame() {
+    STATE.game.active = true;
+    AUDIO.playBGM();
+    generateQuestion('p1');
+    generateQuestion('p2');
+    STATE.game.interval = setInterval(gameTick, 1000);
+}
+
+function gameTick() {
+    if (!STATE.game.active) return;
+    STATE.game.timer--;
+    const timerEl = get('game-timer');
+    const pill    = get('timer-pill');
+
+    if (STATE.game.suddenDeath) {
+        if (timerEl) timerEl.textContent = 'SD!';
+        if (pill)    pill.classList.add('sd');
+    } else {
+        if (timerEl) timerEl.textContent = STATE.game.timer;
+        if (STATE.game.timer <= 10 && pill) pill.classList.add('danger');
+        if (STATE.game.timer > 0
+            && STATE.game.timer % DIFFICULTY_RAMP_SECS === 0
+            && STATE.game.difficulty < 5) {
+            STATE.game.difficulty++;
+        }
+        if (STATE.game.timer <= 0) {
+            if (STATE.game.tugValue === 50) triggerSuddenDeath();
+            else                            endGame('TIME_UP');
+        }
+    }
+}
+
+function triggerSuddenDeath() {
+    STATE.game.suddenDeath = true;
+    STATE.game.timer       = 9999;
+    AUDIO.playWrong();
+    const overlay = get('countdown-overlay');
+    const text    = get('countdown-text');
+    if (overlay) overlay.style.display = 'flex';
+    if (text)    { text.textContent = 'SUDDEN DEATH!'; text.className = 'countdown-fight'; }
+    setTimeout(() => { if (overlay) overlay.style.display = 'none'; }, 1800);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §20  QUESTION ENGINE
+   ───────────────────────────────────────────────────────────── */
+
+const ENG_WORDS = [
+    { f:'APPLE',  m:'A_PLE',  a:2, o:['R','P','S'] }, { f:'TIGER',  m:'TI_ER',  a:3, o:['A','I','G'] },
+    { f:'HOUSE',  m:'HO_SE',  a:1, o:['U','A','E'] }, { f:'WATER',  m:'WA_ER',  a:3, o:['P','D','T'] },
+    { f:'ROBOT',  m:'ROB_T',  a:3, o:['A','I','O'] }, { f:'MUSIC',  m:'MUS_C',  a:2, o:['K','I','E'] },
+    { f:'PHONE',  m:'PH_NE',  a:3, o:['A','U','O'] }, { f:'EARTH',  m:'E_RTH',  a:1, o:['A','O','U'] },
+    { f:'MONEY',  m:'MON_Y',  a:2, o:['I','E','A'] }, { f:'RIVER',  m:'RIV_R',  a:2, o:['A','E','I'] },
+    { f:'STONE',  m:'ST_NE',  a:2, o:['A','O','I'] }, { f:'HAPPY',  m:'HA_PY',  a:1, o:['P','B','D'] },
+    { f:'GREEN',  m:'GR_EN',  a:3, o:['I','A','E'] }, { f:'NIGHT',  m:'NI_HT',  a:1, o:['G','F','H'] },
+    { f:'PIZZA',  m:'PI_ZA',  a:2, o:['S','Z','X'] }, { f:'TRAIN',  m:'TR_IN',  a:2, o:['E','A','I'] },
+    { f:'GHOST',  m:'GH_ST',  a:3, o:['A','I','O'] }, { f:'MOUSE',  m:'MO_SE',  a:2, o:['O','U','A'] },
+    { f:'CLOCK',  m:'CL_CK',  a:2, o:['A','O','U'] }, { f:'SPACE',  m:'SP_CE',  a:3, o:['E','I','A'] },
+    { f:'WORLD',  m:'WO_LD',  a:1, o:['R','L','D'] }, { f:'TABLE',  m:'TA_LE',  a:2, o:['P','B','D'] },
+    { f:'FLOOR',  m:'FL_OR',  a:2, o:['A','O','U'] }, { f:'SHOES',  m:'SH_ES',  a:1, o:['O','A','I'] },
+    { f:'FRUIT',  m:'FR_IT',  a:3, o:['O','I','U'] }, { f:'GRAPE',  m:'GR_PE',  a:3, o:['E','I','A'] },
+    { f:'BREAD',  m:'BR_AD',  a:3, o:['E','I','O'] }, { f:'CLOUD',  m:'CL_UD',  a:3, o:['O','A','U'] },
+    { f:'DREAM',  m:'DR_AM',  a:3, o:['E','A','I'] }, { f:'FLAME',  m:'FL_ME',  a:3, o:['A','O','I'] },
+    { f:'GLOBE',  m:'GL_BE',  a:3, o:['O','A','I'] }, { f:'PLANT',  m:'PL_NT',  a:3, o:['A','O','I'] },
+    { f:'SMILE',  m:'SM_LE',  a:2, o:['I','O','A'] }, { f:'STORM',  m:'ST_RM',  a:3, o:['O','A','U'] },
+    { f:'SWORD',  m:'SW_RD',  a:3, o:['O','A','U'] }, { f:'TOWER',  m:'T_WER',  a:1, o:['O','A','E'] },
+    { f:'TRIBE',  m:'TR_BE',  a:2, o:['I','A','O'] }, { f:'VOICE',  m:'VO_CE',  a:2, o:['I','A','O'] },
+    { f:'WHEEL',  m:'WH_EL',  a:3, o:['E','A','O'] }, { f:'YOUTH',  m:'Y_UTH',  a:1, o:['O','A','U'] },
+];
+
+function rand(n) { return Math.floor(Math.random() * n) + 1; }
+
+function generateQuestion(player) {
+    const diff = STATE.game.difficulty;
+    const q    = GAME_MODE.mode === 'math'
+        ? generateMathQuestion(diff)
+        : generateEnglishQuestion();
+    STATE.game[player].q         = q;
+    STATE.game[player].startTime = Date.now();
+    STATE.game[player].ans       = '';
+    renderQuestion(player, q);
+}
+
+/**
+ * Generate a math question.
+ * In Arcade mode, only toggled operations are used.
+ * In Battle / Tournament, op is chosen by difficulty tier.
+ */
+function generateMathQuestion(diff) {
+    const r          = Math.random();
+    const isArcade   = STATE.gameType === 'arcade';
+    const activeOps  = isArcade
+        ? OPS_ORDER.filter(o => STATE.battle.arcadeOps[o])
+        : null;
+
+    // Choose operation
+    let chosenOp;
+    if (activeOps && activeOps.length > 0) {
+        chosenOp = activeOps[Math.floor(Math.random() * activeOps.length)];
+    } else {
+        if (diff <= 1)      chosenOp = r > 0.5  ? 'add'  : 'sub';
+        else if (diff <= 2) chosenOp = r > 0.55 ? 'mult' : 'add';
+        else if (diff <= 3) chosenOp = r < 0.3  ? 'div'  : r < 0.6 ? 'mult' : 'sub';
+        else if (diff <= 4) chosenOp = r < 0.35 ? 'div'  : r < 0.65 ? 'mult' : 'add';
+        else                chosenOp = r < 0.4  ? 'mult' : 'add';
+    }
+
+    const single = () => Math.floor(Math.random() * 9) + 1;
+    const double = () => Math.floor(Math.random() * 90) + 10;
+    let a, b, op, ans;
+
+    if (chosenOp === 'add') {
+        if (diff <= 1)      { a = single(); b = single(); }
+        else if (diff <= 3) { a = double(); b = double(); }
+        else                { a = double() + 50; b = double(); }
+        ans = a + b; op = '+';
+    } else if (chosenOp === 'sub') {
+        if (diff <= 1)      { a = single() + 5; b = single(); }
+        else if (diff <= 3) { a = double() + 10; b = double() % 30 + 5; }
+        else                { a = double() + 30; b = double(); }
+        if (a < b) [a, b] = [b, a];
+        ans = a - b; op = '−';
+    } else if (chosenOp === 'mult') {
+        if (diff <= 2)      { a = single(); b = single(); }
+        else if (diff <= 4) { a = single() + 2; b = single() + 2; }
+        else                { a = rand(15) + 5; b = rand(15) + 5; }
+        ans = a * b; op = '×';
+    } else {
+        if (diff <= 2)      { b = single(); a = b * single(); }
+        else if (diff <= 4) { b = single() + 1; a = b * (rand(9) + 2); }
+        else                { b = single() + 2; a = b * (rand(11) + 3); }
+        ans = a / b; op = '÷';
+    }
+
+    return { type: 'math', text: `${a} ${op} ${b}`, ans: Math.round(ans) };
+}
+
+function generateEnglishQuestion() {
+    const word = ENG_WORDS[Math.floor(Math.random() * ENG_WORDS.length)];
+    return { type: 'eng', text: word.m, ans: word.a, opts: word.o };
+}
+
+function renderQuestion(player, q) {
+    const qtxt  = get(`${player}-q-text`);
+    const inp   = get(`${player}-input`);
+    const opts  = get(`${player}-eng-opts`);
+    if (qtxt) qtxt.textContent = q.text;
+    if (inp)  inp.textContent  = '';
+    if (!opts) return;
+
+    if (q.type === 'eng') {
+        opts.classList.remove('hidden');
+        const cc = player === 'p1' ? 'eng-opt-p1' : 'eng-opt-p2';
+        opts.innerHTML = q.opts.map((opt, i) =>
+            `<div class="eng-opt ${cc}" onclick="tapInput('${player}','${i + 1}')">
+                <span class="text-[var(--muted)] text-[10px]">${i + 1}.</span> ${opt}
+            </div>`).join('');
+    } else {
+        opts.classList.add('hidden');
+    }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §21  INPUT HANDLING & VALIDATION
+   ───────────────────────────────────────────────────────────── */
+
+// Global keyboard listener — game input only (assessment handled separately)
+document.addEventListener('keydown', (e) => {
+    if (STATE.assessment.active) return;   // assessment has its own handler
+    if (STATE.kbdCheck.active)   return;   // pre-check has its own handler
+    if (!STATE.game.active)      return;
+
+    const k        = e.key;
+    const isDigit  = /^[0-9]$/.test(k);
+    const isNumpad = e.code.startsWith('Numpad') && isDigit;
+    const isTopRow = e.code.startsWith('Digit')  && isDigit;
+
+    // P1: top number row  |  clear: S
+    if (isTopRow && !STATE.game.p1.frozen) handleInput('p1', k);
+    if (e.code === 'KeyS')                clearInput('p1');
+
+    // P2: numpad  |  clear: Backspace
+    if (isNumpad && !STATE.game.p2.frozen) handleInput('p2', k);
+    if (e.code === 'Backspace')           clearInput('p2');
+});
+
+// Assessment keyboard listener
+document.addEventListener('keydown', (e) => {
+    if (!STATE.assessment.active) return;
+    if (e.key === 'Enter') { e.preventDefault(); submitAssessmentAnswer(); }
+});
+
+// Kbd pre-check listener (registered/deregistered dynamically in runKbdPreCheck)
+
+function tapInput(player, char) {
+    if (!STATE.game.active) return;
+    if (STATE.game[player].frozen) return;
+    handleInput(player, char);
+}
+window.tapInput = tapInput;
+
+function tapClear(player) {
+    if (STATE.game.active) clearInput(player);
+}
+window.tapClear = tapClear;
+
+function handleInput(player, char) {
+    const ps = STATE.game[player];
+    if (ps.frozen || ps.processing) return;
+    const q = ps.q;
+    if (!q) return;
+    ps.ans += char;
+    const inp = get(`${player}-input`);
+    if (inp) inp.textContent = ps.ans;
+    if (ps.ans.length >= q.ans.toString().length) {
+        ps.processing = true;
+        setTimeout(() => validate(player), 60);
+    }
+}
+
+function clearInput(player) {
+    STATE.game[player].ans = '';
+    const inp = get(`${player}-input`);
+    if (inp) inp.textContent = '';
+}
+
+function validate(player) {
+    const ps      = STATE.game[player];
+    const given   = parseInt(ps.ans, 10);
+    const correct = ps.q.ans;
+    const elapsed = Date.now() - ps.startTime;
+
+    if (given === correct) onCorrectAnswer(player, elapsed);
+    else                   onWrongAnswer(player, elapsed);
+
+    setTimeout(() => {
+        ps.processing = false;
+        clearInput(player);
+        generateQuestion(player);
+    }, FEEDBACK_VISIBLE_MS);
+}
+
+function onCorrectAnswer(player, elapsed) {
+    const ps = STATE.game[player];
+    ps.score++;
+    ps.streak++;
+
+    // Write to profile only in tracked modes (not arcade)
+    if (STATE.gameType !== 'arcade') updateMatchStats(ps.name, true, elapsed);
+
+    const scoreEl = get(`${player}-score`);
+    if (scoreEl) scoreEl.textContent = ps.score;
+    AUDIO.playCorrect();
+    flashFeedback(`${player}-feedback`, '+GOOD', 'feedback-flash text-[var(--green)]');
+
+    if (ps.streak >= 3) {
+        const c = get(`${player}-combo`);
+        if (c) c.style.display = 'inline-flex';
+    }
+
+    // Rope power: base 8, +6 for streak, rubber-band bonus when far behind
+    let power = 8;
+    if (ps.streak >= 3) power = 14;
+    if (ps.streak >= 6) power = 18;
+    if (player === 'p1' && STATE.game.tugValue > 72) power += 6;
+    if (player === 'p2' && STATE.game.tugValue < 28) power += 6;
+
+    if (power > 12) {
+        document.body.classList.add('shake');
+        setTimeout(() => document.body.classList.remove('shake'), 450);
+    }
+    moveTug(player, power);
+}
+
+function onWrongAnswer(player, elapsed) {
+    const ps  = STATE.game[player];
+    const opp = player === 'p1' ? 'p2' : 'p1';
+    ps.streak = 0;
+    const c = get(`${player}-combo`);
+    if (c) c.style.display = 'none';
+
+    if (STATE.gameType !== 'arcade') updateMatchStats(ps.name, false, elapsed);
+
+    AUDIO.playWrong();
+    flashFeedback(`${player}-feedback`, 'MISS', 'feedback-flash text-[var(--red)]');
+    moveTug(opp, 4);   // penalty: opponent gets a small pull
+
+    // Anti-spam freeze: 3 wrong answers within 3 seconds
+    const now = Date.now();
+    ps.wrongTimes.push(now);
+    if (ps.wrongTimes.length > WRONG_SPAM_COUNT) ps.wrongTimes.shift();
+    if (ps.wrongTimes.length === WRONG_SPAM_COUNT) {
+        const window = ps.wrongTimes[WRONG_SPAM_COUNT - 1] - ps.wrongTimes[0];
+        if (window < WRONG_SPAM_WINDOW_MS) {
+            freezePlayer(player);
+            ps.wrongTimes = [];
+        }
+    }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §22  TUG-OF-WAR PHYSICS & VISUALS
+   ───────────────────────────────────────────────────────────── */
+
+function moveTug(puller, amount) {
+    if (puller === 'p1') STATE.game.tugValue -= amount;
+    else                 STATE.game.tugValue += amount;
+    STATE.game.tugValue = Math.max(0, Math.min(TUG_WIN_THRESHOLD, STATE.game.tugValue));
+    updateTugVisuals();
+    if (STATE.game.tugValue <= 0)                      endGame('P1_WIN');
+    else if (STATE.game.tugValue >= TUG_WIN_THRESHOLD) endGame('P2_WIN');
+}
+
+function updateTugVisuals() {
+    const tug    = STATE.game.tugValue;
+    const marker = get('rope-marker');
+    const pctEl  = get('rope-pct');
+    if (!marker) return;
+
+    // Zone background intensity tinting
+    const zone1 = get('zone-p1'), zone2 = get('zone-p2');
+    if (zone1 && zone2) {
+        if (tug < 40) {
+            zone1.style.background = 'radial-gradient(ellipse 80% 60% at 50% 120%, rgba(79,70,229,0.18) 0%, transparent 70%)';
+            zone2.style.background = 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(245,158,11,0.04) 0%, transparent 70%)';
+        } else if (tug > 60) {
+            zone1.style.background = 'radial-gradient(ellipse 80% 60% at 50% 120%, rgba(79,70,229,0.04) 0%, transparent 70%)';
+            zone2.style.background = 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(245,158,11,0.18) 0%, transparent 70%)';
+        } else {
+            zone1.style.background = 'radial-gradient(ellipse 80% 60% at 50% 120%, rgba(79,70,229,0.08) 0%, transparent 70%)';
+            zone2.style.background = 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(245,158,11,0.08) 0%, transparent 70%)';
+        }
+    }
+
+    // Marker offset: tug=50 → centre, tug=0 → P1 side, tug=100 → P2 side
+    const offset      = (tug - 50) * 0.9;  // ±45 units
+    const isLandscape = window.innerWidth >= 1024;
+    marker.style.left      = '50%';
+    marker.style.top       = '50%';
+    marker.style.transform = isLandscape
+        ? `translate(calc(-50% + ${offset}vw), -50%)`
+        : `translate(-50%, calc(-50% + ${offset}vh))`;
+
+    if (pctEl) pctEl.textContent = Math.round(tug);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §23  FREEZE MECHANIC
+   ───────────────────────────────────────────────────────────── */
+
+function freezePlayer(player) {
+    const ps = STATE.game[player];
+    ps.frozen = true;
+    const ov = get(`${player}-frozen`);
+    if (ov) ov.style.display = 'flex';
+    setTimeout(() => {
+        ps.frozen = false;
+        if (ov) ov.style.display = 'none';
+    }, FREEZE_DURATION_MS);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §24  GAME END & WINNER SCREEN
+   ───────────────────────────────────────────────────────────── */
+
+function endGame(reason) {
+    if (!STATE.game.active) return;   // guard double-call
+    STATE.game.active = false;
+    clearInterval(STATE.game.interval);
+    STATE.game.interval = null;
+    AUDIO.stopBGM();
+
+    const p1 = STATE.game.p1, p2 = STATE.game.p2;
+    let winnerName, winReason;
+
+    switch (reason) {
+        case 'P1_WIN':
+            winnerName = p1.name;
+            winReason  = 'Knockout! Pulled to victory.';
+            break;
+        case 'P2_WIN':
+            winnerName = p2.name;
+            winReason  = 'Knockout! Pulled to victory.';
+            break;
+        case 'TIME_UP':
+            if      (STATE.game.tugValue < 50) { winnerName = p1.name; winReason = "Time's up — P1 had the edge!"; }
+            else if (STATE.game.tugValue > 50) { winnerName = p2.name; winReason = "Time's up — P2 had the edge!"; }
+            else                               { winnerName = 'DRAW';  winReason = 'Perfect tie!'; }
+            break;
+        default:
+            winnerName = reason;
+            winReason  = STATE.game.suddenDeath ? 'Sudden Death Victory!' : 'Victory!';
+    }
+
+    AUDIO.playWin();
+    if (winnerName !== 'DRAW') {
+        confetti({ particleCount: 220, spread: 110, origin: { y: 0.6 },
+                   colors: ['#4F46E5', '#F59E0B', '#10B981', '#fff'] });
+    }
+
+    const wn = get('winner-name');   if (wn)  wn.textContent  = winnerName;
+    const wr = get('winner-reason'); if (wr)  wr.textContent  = winReason;
+    const ws2= get('winner-scores'); if (ws2) ws2.textContent = `${p1.score * 10} – ${p2.score * 10}`;
+
+    const ws = get('screen-winner');
+    if (ws) ws.style.display = 'flex';
+
+    const btn = get('btn-winner-continue');
+    if (btn) btn.onclick = () => {
+        if (ws) ws.style.display = 'none';
+        if (STATE.gameType === 'tournament') handleTournamentWin(winnerName);
+        else                                showScreen('screen-menu');
+    };
+}
+
+/* ─────────────────────────────────────────────────────────────
+   §25  OUTSIDE-CLICK → CLOSE AUTOCOMPLETE
+   ───────────────────────────────────────────────────────────── */
+
+document.addEventListener('click', (e) => {
+    ['p1', 'p2'].forEach(pl => {
+        const list = get(`${pl}-ac-list`);
+        const inp  = get(`${pl}-name-input`);
+        if (list && inp && !list.contains(e.target) && e.target !== inp) {
+            closeAutocomplete(pl);
+        }
+    });
+});
+
+/* ─────────────────────────────────────────────────────────────
+   §26  INITIALISATION
+   ───────────────────────────────────────────────────────────── */
+
+document.addEventListener('DOMContentLoaded', async () => {
+    // 1. Boot audio
+    AUDIO.init();
+
+    // 2. Load persisted profiles & history
+    loadProfiles();
+    try {
+        const h = localStorage.getItem(HISTORY_KEY);
+        if (h) STATE.history = JSON.parse(h);
+    } catch (e) { STATE.history = []; }
+
+    // 3. Load student database from JSON
+    await loadStudents();
+
+    // 4. Initialise mode toggle buttons
+    initModeButtons();
+
+    // 5. Centre the rope marker
+    const marker = get('rope-marker');
+    if (marker) {
+        marker.style.left      = '50%';
+        marker.style.top       = '50%';
+        marker.style.transform = 'translate(-50%, -50%)';
+    }
+
+    // 6. Wire the hidden title trigger (5 clicks = teacher dashboard)
+    const trigger = get('hidden-title-trigger');
+    if (trigger) trigger.addEventListener('click', onTitleClick);
+
+    // 7. Run setup wizard (skips if already done today)
+    runSetup(false);
+});
+
+/* ─────────────────────────────────────────────────────────────
+   §27  GLOBAL EXPORTS  (all functions called from inline HTML)
+   ───────────────────────────────────────────────────────────── */
+
+window.get                    = get;
+window.showScreen             = showScreen;
+window.openModal              = openModal;
+window.closeModal             = closeModal;
+window.toggleMute             = toggleMute;
+window.onTitleClick           = onTitleClick;
+
+// Setup wizard
+window.runSetup               = runSetup;
+window.skipSetup              = skipSetup;
+
+// Kbd pre-check
+window.runKbdPreCheck         = runKbdPreCheck;
+window.skipKbdPreCheck        = skipKbdPreCheck;
+
+// Mode selector
+window.setGameMode            = setGameMode;
+
+// Assessment
+window.setupAssessmentMode    = setupAssessmentMode;
+window.startAssessment        = startAssessment;
+window.submitAssessmentAnswer = submitAssessmentAnswer;
+window.finishAssessmentDone   = function() { showScreen('screen-menu'); };
+
+// Battle / Arcade
+window.setupBattleMode        = setupBattleMode;
+window.setupArcadeMode        = setupArcadeMode;
+window.toggleArcadeOp         = toggleArcadeOp;
+window.startBattleGame        = startBattleGame;
+window.onNameInput            = onNameInput;
+window.onNameKeydown          = onNameKeydown;
+window.selectStudent          = selectStudent;
+window.clearPlayerSelection   = clearPlayerSelection;
+
+// Admin / Competition
+window.startCompetitionSetup  = startCompetitionSetup;
+window.verifyAdminPass        = verifyAdminPass;
+window.showTeacherLogin       = showTeacherLogin;
+
+// Tournament
+window.loadRosterIntoPlayers  = loadRosterIntoPlayers;
+window.addTourneyPlayer       = addTourneyPlayer;
+window.clearTPlayers          = clearTPlayers;
+window.removeTourneyPlayer    = removeTourneyPlayer;
+window.generateBracket        = generateBracket;
+window.setActiveMatch         = setActiveMatch;
+window.saveAndExit            = saveAndExit;
+window.finishTournament       = finishTournament;
+window.handleTournamentWin    = handleTournamentWin;
+
+// Teacher dashboard
+window.sortTeacherTable       = sortTeacherTable;
+window.hideTeacher            = hideTeacher;
+window.clearStats             = clearStats;
+window.exportProfiles         = exportProfiles;
+
+// History
+window.showHistory            = showHistory;
+window.clearHistory           = clearHistory;
+
+// Game controls
+window.tapInput               = tapInput;
+window.tapClear               = tapClear;
+window.prepareGame            = prepareGame;
