@@ -112,12 +112,15 @@ const STATE = {
 
     /* ── tournament ── */
     tourney: {
-        id:          null,
-        players:     [],      // { name, studentId, present } objects
-        bracket:     [],
-        activeRound: 0,
-        activeMatch: 0,
-        classFilter: 'all',
+        id:             null,
+        scope:          'single',    // 'single' | 'multi'
+        selectedClasses:[],          // array of class numbers chosen
+        roster:         [],          // { name, studentId, class, division, gender, present }
+        matchQueue:     [],          // ordered array of { p1, p2, winner, levelDiff }
+        currentMatch:   0,           // index into matchQueue
+        bracket:        [],          // kept for legacy resume
+        activeRound:    0,
+        activeMatch:    0,
     },
 };
 
@@ -1068,7 +1071,7 @@ function showTeacherLogin() {
 window.showTeacherLogin = showTeacherLogin;
 
 /* ─────────────────────────────────────────────────────────────
-   §14  TOURNAMENT SETUP  (Admin-only, level-based matchmaking)
+   §14  TOURNAMENT — STEP 1: SCOPE SELECTION
    ───────────────────────────────────────────────────────────── */
 
 function launchTournamentSetup() {
@@ -1077,370 +1080,465 @@ function launchTournamentSetup() {
     // Resume check
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(ACTIVE_TOUR_KEY)); } catch (e) {}
-    if (saved && saved.bracket && saved.bracket.length > 0) {
-        if (confirm('Resume the active tournament?')) { loadTournament(saved); return; }
+    if (saved && saved.matchQueue && saved.matchQueue.length > 0) {
+        if (confirm('Resume the active competition?')) { loadTournament(saved); return; }
     }
 
-    // Restore last player list
-    const prev = JSON.parse(localStorage.getItem(LAST_PLAYERS_KEY) || '[]');
-    if (prev.length > 0 && confirm(`Reload ${prev.length} students from last session?`)) {
-        STATE.tourney.players = [...prev];
-    } else {
-        STATE.tourney.players = [];
-    }
-
-    STATE.tourney.id = Date.now();
-    renderTourneyClassFilter();
-    updateTourneyPlayerList();
-    showScreen('screen-tourney-setup');
+    STATE.tourney.id             = Date.now();
+    STATE.tourney.roster         = [];
+    STATE.tourney.matchQueue     = [];
+    STATE.tourney.currentMatch   = 0;
+    STATE.tourney.selectedClasses= [];
+    showScreen('screen-tourney-scope');
 }
 
 function loadTournament(data) {
-    STATE.tourney.players     = data.players || [];
-    STATE.tourney.bracket     = data.bracket || [];
-    STATE.tourney.activeRound = data.activeRound || 0;
-    STATE.tourney.activeMatch = data.activeMatch || 0;
-    STATE.tourney.id          = data.id || Date.now();
-    renderBracket();
+    Object.assign(STATE.tourney, {
+        id:             data.id || Date.now(),
+        scope:          data.scope || 'single',
+        selectedClasses:data.selectedClasses || [],
+        roster:         data.roster || [],
+        matchQueue:     data.matchQueue || [],
+        currentMatch:   data.currentMatch || 0,
+    });
+    renderLiveHub();
     showScreen('screen-tourney-hub');
 }
 
-/** Build a class dropdown from unique classes in students.json */
-function renderTourneyClassFilter() {
-    const sel = get('tourney-class-filter');
-    if (!sel) return;
+/** Called from the scope screen buttons */
+function selectTourneyScope(scope) {
+    STATE.tourney.scope          = scope;
+    STATE.tourney.selectedClasses= [];
+    STATE.tourney.roster         = [];
+
+    // Update the sub-label on the roster screen
+    const lbl = get('tourney-scope-label');
+    if (lbl) lbl.textContent = scope === 'single'
+        ? 'Select one class — then uncheck absentees'
+        : 'Select one or more classes — then uncheck absentees';
+
+    renderClassChips();
+    renderRosterList();
+    showScreen('screen-tourney-setup');
+}
+window.selectTourneyScope = selectTourneyScope;
+
+/* ─────────────────────────────────────────────────────────────
+   §14b  TOURNAMENT — STEP 2: ROSTER BUILDER
+   ───────────────────────────────────────────────────────────── */
+
+/** Render the class chips from unique classes in students.json */
+function renderClassChips() {
+    const container = get('tourney-class-chips');
+    if (!container) return;
+
     const classes = [...new Set(STATE.students.map(s => s.class))].sort((a, b) => a - b);
-    sel.innerHTML = `<option value="all">All Classes</option>`
-        + classes.map(c => `<option value="${c}">Class ${c}</option>`).join('');
-    sel.onchange = () => {
-        STATE.tourney.classFilter = sel.value;
-        renderTourneyRoster();
-    };
-    renderTourneyRoster();
+    container.innerHTML = classes.map(c => {
+        const sel = STATE.tourney.selectedClasses.includes(c);
+        return `<button class="class-chip${sel ? ' selected' : ''}"
+            onclick="toggleClassChip(${c})" data-class="${c}">
+            Class ${c}
+        </button>`;
+    }).join('');
 }
 
-/**
- * Render the tournament roster with attendance toggles.
- * Filters students by selected class; each has a present/absent toggle.
- * By default all matching students are present (checked).
- */
-function renderTourneyRoster() {
-    const filter   = STATE.tourney.classFilter;
-    const filtered = filter === 'all'
-        ? STATE.students
-        : STATE.students.filter(s => String(s.class) === String(filter));
+function toggleClassChip(classNum) {
+    const scope   = STATE.tourney.scope;
+    const already = STATE.tourney.selectedClasses.includes(classNum);
 
-    const roster = get('tourney-roster');
-    if (!roster) { return; }
+    if (already) {
+        // Deselect
+        STATE.tourney.selectedClasses = STATE.tourney.selectedClasses.filter(c => c !== classNum);
+    } else {
+        if (scope === 'single') {
+            // Single-class mode: only one at a time
+            STATE.tourney.selectedClasses = [classNum];
+        } else {
+            STATE.tourney.selectedClasses.push(classNum);
+        }
+    }
 
-    if (filtered.length === 0) {
-        roster.innerHTML = '<li class="text-center text-[var(--muted)] text-sm py-4">No students in this class.</li>';
-        get('btn-load-roster').classList.add('hidden');
+    renderClassChips();
+    buildRosterFromSelection();
+    renderRosterList();
+}
+window.toggleClassChip = toggleClassChip;
+
+/** Build the roster array from selected classes, preserving previous present/absent states */
+function buildRosterFromSelection() {
+    const prev = STATE.tourney.roster;
+
+    STATE.tourney.roster = STATE.students
+        .filter(s => STATE.tourney.selectedClasses.includes(s.class))
+        .map(s => {
+            const sid      = buildStudentId(s.name, s.class);
+            const existing = prev.find(r => r.studentId === sid);
+            return {
+                name:      s.name,
+                studentId: sid,
+                class:     s.class,
+                division:  s.division,
+                gender:    s.gender,
+                present:   existing ? existing.present : true,   // preserve toggled state
+            };
+        });
+}
+
+/** Render the roster toggle list */
+function renderRosterList() {
+    const ul      = get('tourney-roster');
+    const cntEl   = get('roster-present-count');
+    const btn     = get('btn-confirm-roster');
+    if (!ul) return;
+
+    const roster  = STATE.tourney.roster;
+
+    if (roster.length === 0) {
+        ul.innerHTML = `<li class="text-center text-[var(--muted)] text-sm py-8 opacity-50">
+            <i class="fas fa-hand-pointer mr-2"></i>Select a class above to load students
+        </li>`;
+        if (cntEl) cntEl.textContent = '0 present';
+        if (btn)   btn.classList.add('hidden');
         return;
     }
 
-    roster.innerHTML = filtered.map((s, i) => {
-        const sid    = buildStudentId(s.name, s.class);
-        const p      = STATE.profiles[sid];
-        const lvl    = p ? `+${p.addition_level ?? '?'} −${p.subtraction_level ?? '?'}` : 'Not assessed';
-        const g      = s.gender === 'F' ? '♀' : '♂';
+    // Sort: present first, then by name
+    const sorted = [...roster].sort((a, b) => {
+        if (a.present !== b.present) return b.present ? 1 : -1;
+        return a.name.localeCompare(b.name);
+    });
+
+    ul.innerHTML = sorted.map((s, i) => {
+        const sid   = s.studentId;
+        const p     = STATE.profiles[sid];
+        const lvl   = p ? getOverallLevel(sid) : null;
+        const lvlTxt= lvl !== null && lvl > 0 ? `Lvl ${lvl.toFixed(1)}` : (p ? 'Unranked' : 'Not assessed');
+        const g     = s.gender === 'F' ? '♀' : '♂';
         return `
-        <li class="flex items-center gap-3 bg-[var(--surface)] p-2.5 rounded-lg border border-[var(--border)]">
-            <label class="flex items-center gap-2 cursor-pointer flex-1">
-                <input type="checkbox" id="roster-chk-${i}" class="roster-check" checked
-                    data-name="${s.name}" data-class="${s.class}" data-division="${s.division}" data-gender="${s.gender}">
-                <span class="f-display font-bold text-white text-sm">${s.name}</span>
-                <span class="text-[var(--muted)] text-xs">${g} Cls ${s.class}${s.division}</span>
-            </label>
-            <span class="text-xs f-mono text-[var(--muted)]">${lvl}</span>
+        <li id="roster-li-${sid.replace(/[^a-z0-9]/g,'_')}"
+            class="roster-row${s.present ? '' : ' absent'}">
+            <button class="roster-toggle${s.present ? ' on' : ''}"
+                onclick="toggleRosterPresent('${sid}')"
+                title="${s.present ? 'Mark absent' : 'Mark present'}">
+            </button>
+            <div class="flex-1 min-w-0">
+                <div class="f-display font-bold text-white text-sm truncate">${s.name}</div>
+                <div class="text-[var(--muted)] text-[10px]">${g} · Cls ${s.class}${s.division}</div>
+            </div>
+            <div class="f-mono text-[10px] text-[var(--muted)] text-right flex-shrink-0">${lvlTxt}</div>
         </li>`;
     }).join('');
 
-    get('btn-load-roster').classList.remove('hidden');
-}
-
-/** Load selected (present) students from roster checkboxes into the player list */
-function loadRosterIntoPlayers() {
-    const checks  = document.querySelectorAll('.roster-check:checked');
-    const present = [];
-    checks.forEach(ch => {
-        const name  = ch.dataset.name;
-        const clsV  = parseInt(ch.dataset.class, 10);
-        const sid   = buildStudentId(name, clsV);
-        // Avoid duplicates
-        if (!present.some(p => p.studentId === sid)) {
-            present.push({ name, studentId: sid, present: true,
-                           class: clsV, division: ch.dataset.division, gender: ch.dataset.gender });
-        }
-    });
-    if (present.length === 0) { alert('No students selected.'); return; }
-    STATE.tourney.players = present;
-    updateTourneyPlayerList();
-    // Scroll down to the player list
-    get('t-player-list').scrollIntoView({ behavior: 'smooth' });
-}
-window.loadRosterIntoPlayers = loadRosterIntoPlayers;
-
-function addTourneyPlayer() {
-    const inp  = get('tourney-input');
-    const name = inp.value.trim();
-    if (!name) return;
-    // Allow adding by typing name (free entry)
-    const existing = STATE.tourney.players.find(p => p.name === name);
-    if (existing) { alert(`"${name}" is already in the list.`); return; }
-    const sid = buildStudentId(name, 0);
-    STATE.tourney.players.push({ name, studentId: sid, present: true, class: 0, division: '?', gender: '?' });
-    inp.value = '';
-    inp.focus();
-    updateTourneyPlayerList();
-    saveTourneyPlayers();
-}
-window.addTourneyPlayer = addTourneyPlayer;
-
-function clearTPlayers() {
-    if (!confirm('Remove all players?')) return;
-    STATE.tourney.players = [];
-    updateTourneyPlayerList();
-}
-window.clearTPlayers = clearTPlayers;
-
-function removeTourneyPlayer(index) {
-    STATE.tourney.players.splice(index, 1);
-    updateTourneyPlayerList();
-    saveTourneyPlayers();
-}
-window.removeTourneyPlayer = removeTourneyPlayer;
-
-function saveTourneyPlayers() {
-    localStorage.setItem(LAST_PLAYERS_KEY, JSON.stringify(STATE.tourney.players));
-}
-
-function updateTourneyPlayerList() {
-    const count = STATE.tourney.players.length;
-    const cntEl = get('t-player-count');
-    if (cntEl) cntEl.textContent = `${count} Player${count !== 1 ? 's' : ''}`;
-
-    const list = get('t-player-list');
-    if (!list) return;
-    if (count === 0) {
-        list.innerHTML = '<li class="text-center text-[var(--muted)] text-sm py-4">No players yet.</li>';
-    } else {
-        list.innerHTML = STATE.tourney.players.map((p, i) => {
-            const lvl = getOverallLevel(p.studentId);
-            const lvlText = lvl > 0 ? `Lvl ${lvl.toFixed(1)}` : 'Unranked';
-            return `
-            <li class="flex justify-between items-center bg-[var(--surface)] p-2.5 rounded-lg border border-[var(--border)]">
-                <span class="f-display font-bold text-white text-sm">${i + 1}. ${p.name}</span>
-                <span class="text-xs f-mono text-[var(--muted)]">${lvlText}</span>
-                <button onclick="removeTourneyPlayer(${i})" class="text-red-400 hover:text-white transition w-6 h-6 flex items-center justify-center">
-                    <i class="fas fa-times text-xs"></i>
-                </button>
-            </li>`;
-        }).join('');
-    }
-
-    const btn = get('btn-gen-bracket');
+    const presentCount = roster.filter(r => r.present).length;
+    if (cntEl) cntEl.textContent = `${presentCount} of ${roster.length} present`;
     if (btn) {
-        if (count >= 2) { btn.classList.remove('hidden'); btn.textContent = `START BRACKET (${count})`; }
-        else            btn.classList.add('hidden');
+        if (presentCount >= 2) btn.classList.remove('hidden');
+        else                   btn.classList.add('hidden');
     }
 }
+
+/** Toggle a student between present and absent */
+function toggleRosterPresent(studentId) {
+    const entry = STATE.tourney.roster.find(r => r.studentId === studentId);
+    if (!entry) return;
+    entry.present = !entry.present;
+    renderRosterList();
+}
+window.toggleRosterPresent = toggleRosterPresent;
+
+/** Check all / uncheck all roster students */
+function checkAllRoster(present) {
+    STATE.tourney.roster.forEach(r => { r.present = present; });
+    renderRosterList();
+}
+window.checkAllRoster = checkAllRoster;
+
+/** Move to Step 3: confirm the present roster and generate match order */
+function confirmRoster() {
+    const present = STATE.tourney.roster.filter(r => r.present);
+    if (present.length < 2) { alert('At least 2 students must be present to start a competition.'); return; }
+
+    // Save for session restore
+    localStorage.setItem(LAST_PLAYERS_KEY, JSON.stringify(STATE.tourney.roster));
+
+    buildMatchQueue(present);
+    renderMatchOrderScreen();
+    showScreen('screen-tourney-order');
+}
+window.confirmRoster = confirmRoster;
 
 /* ─────────────────────────────────────────────────────────────
-   §15  BRACKET ENGINE  (Level-based pairing)
+   §14c  TOURNAMENT — STEP 3: MATCH ORDER
    ───────────────────────────────────────────────────────────── */
 
-function generateBracket() {
-    let players = STATE.tourney.players.map(p => p.name);
-    if (players.length < 2) return;
+/**
+ * Build the match queue using closest-level pairing.
+ * Algorithm:
+ *  1. Sort players by overall level (ascending).
+ *  2. Pair adjacent students (closest skill gap).
+ *  3. If odd number, the middle student gets a BYE (auto-advance).
+ *  4. Queue is a flat ordered list — admin can reorder before starting.
+ */
+function buildMatchQueue(players) {
+    // Sort by level ascending — closest pairs will be adjacent
+    const sorted = [...players].sort((a, b) => getOverallLevel(a.studentId) - getOverallLevel(b.studentId));
 
-    /**
-     * Matchmaking: pair students with the closest overall operation level.
-     * Sort by overall level, then zip top half vs bottom half.
-     * This produces fair matches without using time or points.
-     */
-    const sorted = [...STATE.tourney.players].sort((a, b) => {
-        return getOverallLevel(b.studentId) - getOverallLevel(a.studentId);
-    });
-    players = sorted.map(p => p.name);
-
-    // Pad to next power of 2
-    const size = Math.pow(2, Math.ceil(Math.log2(players.length)));
-    while (players.length < size) players.push('BYE');
-
-    // Interleave top seed vs bottom (fair bracket)
-    const seeded = [];
-    let lo = 0, hi = players.length - 1;
-    while (lo <= hi) {
-        seeded.push(players[lo++]);
-        if (lo <= hi) seeded.push(players[hi--]);
+    const queue = [];
+    let i = 0;
+    while (i < sorted.length - 1) {
+        const p1     = sorted[i];
+        const p2     = sorted[i + 1];
+        const lvlA   = getOverallLevel(p1.studentId);
+        const lvlB   = getOverallLevel(p2.studentId);
+        const diff   = Math.abs(lvlA - lvlB);
+        queue.push({ p1: p1.name, p2: p2.name, winner: null, levelDiff: diff,
+                     p1Id: p1.studentId, p2Id: p2.studentId });
+        i += 2;
+    }
+    // If odd player left, give them a BYE
+    if (sorted.length % 2 === 1) {
+        const bye = sorted[sorted.length - 1];
+        queue.push({ p1: bye.name, p2: 'BYE', winner: bye.name, levelDiff: 0,
+                     p1Id: bye.studentId, p2Id: null });
     }
 
-    STATE.tourney.bracket = [];
-    const round1 = [];
-    for (let i = 0; i < seeded.length; i += 2) {
-        round1.push({ p1: seeded[i], p2: seeded[i + 1], winner: null });
-    }
-    STATE.tourney.bracket.push(round1);
+    STATE.tourney.matchQueue   = queue;
+    STATE.tourney.currentMatch = 0;
+}
 
-    let prev = round1;
-    while (prev.length > 1) {
-        const next = [];
-        for (let i = 0; i < Math.floor(prev.length / 2); i++) {
-            next.push({ p1: 'TBD', p2: 'TBD', winner: null });
+/** Render the match order screen (Step 3) */
+function renderMatchOrderScreen() {
+    const list = get('match-order-list');
+    if (!list) return;
+
+    const queue = STATE.tourney.matchQueue;
+    list.innerHTML = queue.map((m, i) => {
+        const isBye  = m.p2 === 'BYE';
+        const isDone = !!m.winner && !isBye;
+        const diffBadge = m.levelDiff < 0.3 ? '≈ Even match' : m.levelDiff < 1 ? '~ Similar' : '△ Mismatched';
+
+        return `
+        <li id="mo-item-${i}" class="match-order-card${i === 0 ? ' next-match' : ''}${isBye ? ' done' : ''}">
+            <div class="mo-num">${i + 1}</div>
+            <div class="mo-players flex-1">
+                <span class="text-[#818CF8]">${m.p1}</span>
+                <span class="text-[var(--muted)] mx-2 text-xs">vs</span>
+                ${isBye
+                    ? `<span class="text-[var(--muted)] italic text-sm">BYE — auto advance</span>`
+                    : `<span class="text-[#FCD34D]">${m.p2}</span>`}
+            </div>
+            ${!isBye ? `<div class="mo-level text-right">${diffBadge}</div>` : ''}
+            ${!isBye ? `
+            <div class="mo-arrows">
+                <button class="mo-arrow" onclick="moveMatch(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="Move up">▲</button>
+                <button class="mo-arrow" onclick="moveMatch(${i},  1)" ${i === queue.length - 1 ? 'disabled' : ''} title="Move down">▼</button>
+            </div>` : ''}
+        </li>`;
+    }).join('');
+}
+
+/** Move a match up or down in the queue */
+function moveMatch(index, direction) {
+    const queue   = STATE.tourney.matchQueue;
+    const newIdx  = index + direction;
+    if (newIdx < 0 || newIdx >= queue.length) return;
+    // Swap
+    [queue[index], queue[newIdx]] = [queue[newIdx], queue[index]];
+    renderMatchOrderScreen();
+}
+window.moveMatch = moveMatch;
+
+/** Kick off the live competition from the ordered queue */
+function startTournamentFromOrder() {
+    STATE.tourney.currentMatch = 0;
+
+    // Auto-resolve any BYEs at the front
+    while (STATE.tourney.currentMatch < STATE.tourney.matchQueue.length) {
+        const m = STATE.tourney.matchQueue[STATE.tourney.currentMatch];
+        if (m.p2 === 'BYE') {
+            m.winner = m.p1;
+            STATE.tourney.currentMatch++;
+        } else {
+            break;
         }
-        STATE.tourney.bracket.push(next);
-        prev = next;
     }
 
-    resolveByes();
-    findNextMatch();
     saveTournament();
-    renderBracket();
+    renderLiveHub();
     showScreen('screen-tourney-hub');
 }
-window.generateBracket = generateBracket;
+window.startTournamentFromOrder = startTournamentFromOrder;
 
-function resolveByes() {
-    STATE.tourney.bracket[0].forEach((match, idx) => {
-        if (match.p2 === 'BYE' && !match.winner) { match.winner = match.p1; forwardWinner(0, idx, match.p1); }
-        else if (match.p1 === 'BYE' && !match.winner) { match.winner = match.p2; forwardWinner(0, idx, match.p2); }
-    });
-}
+/* ─────────────────────────────────────────────────────────────
+   §15  TOURNAMENT — LIVE HUB  (Step 4: run matches)
+   ───────────────────────────────────────────────────────────── */
 
-function forwardWinner(roundIdx, matchIdx, winnerName) {
-    const nextRoundIdx = roundIdx + 1;
-    if (nextRoundIdx >= STATE.tourney.bracket.length) return;
-    const nextMatchIdx = Math.floor(matchIdx / 2);
-    const slot         = matchIdx % 2 === 0 ? 'p1' : 'p2';
-    const nextMatch    = STATE.tourney.bracket[nextRoundIdx][nextMatchIdx];
-    nextMatch[slot]    = winnerName;
-    const other        = slot === 'p1' ? 'p2' : 'p1';
-    if (nextMatch[other] === 'BYE') { nextMatch.winner = winnerName; forwardWinner(nextRoundIdx, nextMatchIdx, winnerName); }
-}
+/** Render the live match hub: queue on left, action card on right */
+function renderLiveHub() {
+    const queue   = STATE.tourney.matchQueue;
+    const current = STATE.tourney.currentMatch;
+    const total   = queue.length;
+    const done    = queue.filter(m => m.winner).length;
 
-function findNextMatch() {
-    for (let r = 0; r < STATE.tourney.bracket.length; r++) {
-        for (let m = 0; m < STATE.tourney.bracket[r].length; m++) {
-            const match = STATE.tourney.bracket[r][m];
-            if (!match.winner && match.p1 !== 'TBD' && match.p2 !== 'TBD'
-                && match.p1 !== 'BYE' && match.p2 !== 'BYE') {
-                STATE.tourney.activeRound = r;
-                STATE.tourney.activeMatch = m;
-                return true;
-            }
-        }
-    }
-    STATE.tourney.activeRound = -1;
-    STATE.tourney.activeMatch = -1;
-    return false;
-}
+    // Progress label
+    const progEl = get('t-progress-label');
+    if (progEl) progEl.textContent = `${done}/${total} done`;
 
-function setActiveMatch(r, m) { STATE.tourney.activeRound = r; STATE.tourney.activeMatch = m; renderBracket(); }
-window.setActiveMatch = setActiveMatch;
+    const rndEl = get('t-round-label');
+    if (rndEl) rndEl.textContent = current < total
+        ? `Match ${current + 1} of ${total}`
+        : 'All matches complete';
 
-function renderBracket() {
+    // Left panel: full queue as a list
     const container = get('bracket-container');
-    if (!container) return;
-    container.innerHTML = '';
+    if (container) {
+        container.innerHTML = queue.map((m, i) => {
+            const isCurrent = i === current && !m.winner;
+            const isDone    = !!m.winner;
+            const isBye     = m.p2 === 'BYE';
+            const isPlayable= !isDone && !isBye && i !== current;
 
-    STATE.tourney.bracket.forEach((round, rIdx) => {
-        let label = `ROUND ${rIdx + 1}`;
-        if (round.length === 1) label = '🏆 FINAL';
-        else if (round.length === 2) label = 'SEMI-FINAL';
-
-        let html = `<div class="mb-5">
-            <h3 class="text-[10px] font-bold text-[var(--muted)] mb-2 uppercase tracking-widest f-display sticky top-0 py-1"
-                style="background:rgba(13,21,39,0.9)">${label}</h3>
-            <div class="flex flex-col gap-2">`;
-
-        round.forEach((match, mIdx) => {
-            const isActive   = rIdx === STATE.tourney.activeRound && mIdx === STATE.tourney.activeMatch;
-            const isDone     = !!match.winner;
-            const isPlayable = !isDone && match.p1 !== 'TBD' && match.p2 !== 'TBD'
-                               && match.p1 !== 'BYE' && match.p2 !== 'BYE';
-
-            let cls = 'bracket-match';
-            if (isActive) cls += ' active';
+            let cls = 'bracket-match mb-2';
+            if (isCurrent)  cls += ' active';
             else if (isDone) cls += ' done';
             else if (isPlayable) cls += ' playable';
 
-            const click   = isPlayable ? `onclick="setActiveMatch(${rIdx},${mIdx})"` : '';
-            const p1Class = match.winner === match.p1 ? 'bracket-winner-text' : '';
-            const p2Class = match.winner === match.p2 ? 'bracket-winner-text' : '';
+            // Admin can click a future match to jump to it
+            const click = isPlayable ? `onclick="jumpToMatch(${i})"` : '';
 
-            // Show level badges next to names
-            const p1Sid = STATE.tourney.players.find(p => p.name === match.p1)?.studentId;
-            const p2Sid = STATE.tourney.players.find(p => p.name === match.p2)?.studentId;
-            const p1Lvl = p1Sid ? getOverallLevel(p1Sid).toFixed(1) : '';
-            const p2Lvl = p2Sid ? getOverallLevel(p2Sid).toFixed(1) : '';
+            const p1Class = m.winner === m.p1 ? 'bracket-winner-text' : '';
+            const p2Class = m.winner === m.p2 ? 'bracket-winner-text' : '';
+            const winTick = m.winner ? ` <span class="text-[var(--green)] text-xs">✓ ${m.winner}</span>` : '';
 
-            html += `<div class="${cls}" ${click}>
-                <span class="bracket-player ${p1Class}">${match.p1}
-                    ${p1Lvl ? `<span class="text-[10px] text-[var(--muted)] ml-1">[${p1Lvl}]</span>` : ''}</span>
-                <span class="text-[var(--muted)] text-[10px] font-bold f-display">VS</span>
-                <span class="bracket-player ${p2Class} text-right">${match.p2}
-                    ${p2Lvl ? `<span class="text-[10px] text-[var(--muted)] ml-1">[${p2Lvl}]</span>` : ''}</span>
+            return `<div class="${cls}" ${click}>
+                <span class="text-[var(--muted)] f-mono text-[10px] mr-1">${i + 1}.</span>
+                <span class="bracket-player ${p1Class} flex-1">${m.p1}</span>
+                ${isBye ? `<span class="text-[var(--muted)] text-xs italic">BYE</span>` : `
+                <span class="text-[var(--muted)] text-[10px] font-bold f-display mx-1">VS</span>
+                <span class="bracket-player ${p2Class} flex-1 text-right">${m.p2}</span>`}
+                ${winTick}
             </div>`;
-        });
+        }).join('');
+    }
 
-        html += '</div></div>';
-        container.innerHTML += html;
-    });
-
-    renderMatchCard();
+    // Right panel: action card
+    renderLiveMatchCard();
 }
 
-function renderMatchCard() {
-    const card = get('match-card-content');
+/** Render the right-side action card for the current match */
+function renderLiveMatchCard() {
+    const card    = get('match-card-content');
     if (!card) return;
 
-    if (STATE.tourney.activeRound === -1) {
-        const champion = STATE.tourney.bracket[STATE.tourney.bracket.length - 1][0].winner;
+    const queue   = STATE.tourney.matchQueue;
+    const current = STATE.tourney.currentMatch;
+
+    // All done?
+    if (current >= queue.length || queue.every(m => m.winner)) {
+        // Find overall winner: most wins, or last standing
+        const wins = {};
+        queue.forEach(m => {
+            if (m.winner && m.winner !== 'BYE') wins[m.winner] = (wins[m.winner] || 0) + 1;
+        });
+        const champion = Object.keys(wins).sort((a, b) => wins[b] - wins[a])[0] || '—';
+
         card.innerHTML = `<div class="text-center">
-            <div class="text-[var(--green)] f-display font-bold text-xs uppercase tracking-widest mb-3">Champion</div>
+            <div class="text-[var(--green)] f-display font-bold text-xs uppercase tracking-widest mb-3">Competition Over</div>
             <div class="text-5xl mb-3">👑</div>
-            <div class="f-display font-bold text-white text-2xl mb-6">${champion}</div>
+            <div class="f-display font-bold text-white text-2xl mb-1">${champion}</div>
+            <div class="text-[var(--muted)] text-xs mb-6">Most wins: ${wins[champion] || 0}</div>
             <button onclick="finishTournament('${champion}')" class="btn-primary w-full">Save & End</button>
         </div>`;
         return;
     }
 
-    const match  = STATE.tourney.bracket[STATE.tourney.activeRound][STATE.tourney.activeMatch];
-    const total  = STATE.tourney.bracket.length;
-    let label = `Round ${STATE.tourney.activeRound + 1}`;
-    if (STATE.tourney.activeRound === total - 1)      label = '🏆 FINAL';
-    else if (STATE.tourney.activeRound === total - 2) label = 'SEMI-FINAL';
+    const match = queue[current];
 
-    const lbl = get('t-round-label');
-    if (lbl) lbl.textContent = label;
+    // Level info for the card
+    const p1Sid = match.p1Id;
+    const p2Sid = match.p2Id;
+    const p1Lvl = p1Sid ? getOverallLevel(p1Sid).toFixed(1) : '?';
+    const p2Lvl = p2Sid ? getOverallLevel(p2Sid).toFixed(1) : '?';
 
-    card.innerHTML = `<div class="text-center">
-        <div class="text-[var(--p2)] f-display font-bold text-xs uppercase tracking-widest mb-3 animate-pulse">${label} · Up Next</div>
-        <div class="f-display font-bold text-3xl text-[#818CF8] mb-2">${match.p1}</div>
-        <div class="text-[var(--muted)] text-xs f-display mb-2">VS</div>
-        <div class="f-display font-bold text-3xl text-[#FCD34D] mb-6">${match.p2}</div>
-        <button onclick="runKbdPreCheck(() => prepareGame('${match.p1}', '${match.p2}'))" class="btn-primary w-full">
-            <i class="fas fa-bolt mr-2"></i>START MATCH
-        </button>
-    </div>`;
+    card.innerHTML = `
+        <div class="text-center">
+            <div class="text-[var(--p2)] f-display font-bold text-xs uppercase tracking-widest mb-1 animate-pulse">
+                Match ${current + 1} · Up Now
+            </div>
+
+            <div class="my-4 flex flex-col gap-3">
+                <div class="p-3 rounded-xl bg-[var(--p1)]/10 border border-[var(--p1)]/20">
+                    <div class="f-display font-bold text-[#818CF8] text-2xl">${match.p1}</div>
+                    <div class="text-[var(--muted)] text-[10px] f-mono mt-0.5">Level ${p1Lvl}</div>
+                </div>
+                <div class="text-[var(--muted)] f-display text-sm font-bold">VS</div>
+                <div class="p-3 rounded-xl bg-[var(--p2)]/10 border border-[var(--p2)]/20">
+                    <div class="f-display font-bold text-[#FCD34D] text-2xl">${match.p2}</div>
+                    <div class="text-[var(--muted)] text-[10px] f-mono mt-0.5">Level ${p2Lvl}</div>
+                </div>
+            </div>
+
+            <button onclick="runKbdPreCheck(() => prepareGame('${match.p1}', '${match.p2}'))"
+                class="btn-primary w-full mb-2">
+                <i class="fas fa-bolt mr-2"></i>START MATCH
+            </button>
+            <button onclick="adminDeclareWinner('${match.p1}', '${match.p2}')"
+                class="btn-secondary w-full text-xs">
+                <i class="fas fa-gavel mr-1"></i>Declare winner manually
+            </button>
+        </div>`;
 }
 
-function handleTournamentWin(winner) {
-    const match  = STATE.tourney.bracket[STATE.tourney.activeRound][STATE.tourney.activeMatch];
-    match.winner = winner;
-    forwardWinner(STATE.tourney.activeRound, STATE.tourney.activeMatch, winner);
-    findNextMatch();
+/** Admin can click a future match to jump to it (reorder by swapping with current) */
+function jumpToMatch(index) {
+    const current = STATE.tourney.currentMatch;
+    if (index <= current) return;
+    // Swap the clicked match up to position `current`
+    const queue = STATE.tourney.matchQueue;
+    const item  = queue.splice(index, 1)[0];
+    queue.splice(current, 0, item);
     saveTournament();
-    renderBracket();
+    renderLiveHub();
+}
+window.jumpToMatch = jumpToMatch;
+
+/** Manual winner declaration (for walkover / no-show) */
+function adminDeclareWinner(p1Name, p2Name) {
+    const choice = prompt(`Declare winner:\n1 = ${p1Name}\n2 = ${p2Name}\n\nType 1 or 2:`);
+    if (choice === '1') handleTournamentWin(p1Name);
+    else if (choice === '2') handleTournamentWin(p2Name);
+}
+window.adminDeclareWinner = adminDeclareWinner;
+
+/** Called after each game ends, records winner and moves to next match */
+function handleTournamentWin(winner) {
+    const queue   = STATE.tourney.matchQueue;
+    const current = STATE.tourney.currentMatch;
+    if (current >= queue.length) return;
+
+    queue[current].winner = winner;
+
+    // Advance past BYEs
+    STATE.tourney.currentMatch++;
+    while (STATE.tourney.currentMatch < queue.length) {
+        const next = queue[STATE.tourney.currentMatch];
+        if (next.p2 === 'BYE') { next.winner = next.p1; STATE.tourney.currentMatch++; }
+        else break;
+    }
+
+    saveTournament();
+    renderLiveHub();
     showScreen('screen-tourney-hub');
 }
 
 function saveTournament() {
     localStorage.setItem(ACTIVE_TOUR_KEY, JSON.stringify({
-        id: STATE.tourney.id, players: STATE.tourney.players,
-        bracket: STATE.tourney.bracket,
-        activeRound: STATE.tourney.activeRound, activeMatch: STATE.tourney.activeMatch,
+        id:              STATE.tourney.id,
+        scope:           STATE.tourney.scope,
+        selectedClasses: STATE.tourney.selectedClasses,
+        roster:          STATE.tourney.roster,
+        matchQueue:      STATE.tourney.matchQueue,
+        currentMatch:    STATE.tourney.currentMatch,
     }));
 }
 
@@ -1449,10 +1547,13 @@ window.saveAndExit = saveAndExit;
 
 function finishTournament(winner) {
     const record = {
-        id: STATE.tourney.id,
-        date: new Date().toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }),
-        time: new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' }),
-        winner, players: STATE.tourney.players.length, mode: GAME_MODE.mode,
+        id:      STATE.tourney.id,
+        date:    new Date().toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }),
+        time:    new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' }),
+        winner,
+        players: STATE.tourney.roster.filter(r => r.present).length,
+        mode:    GAME_MODE.mode,
+        classes: STATE.tourney.selectedClasses.join(', '),
     };
     STATE.history.unshift(record);
     localStorage.setItem(HISTORY_KEY, JSON.stringify(STATE.history));
@@ -1460,6 +1561,20 @@ function finishTournament(winner) {
     showScreen('screen-menu');
 }
 window.finishTournament = finishTournament;
+
+// Kept for legacy — not used in new flow
+function generateBracket() { confirmRoster(); }
+window.generateBracket = generateBracket;
+function setActiveMatch() {}
+window.setActiveMatch = setActiveMatch;
+function addTourneyPlayer() {}
+window.addTourneyPlayer = addTourneyPlayer;
+function clearTPlayers() {}
+window.clearTPlayers = clearTPlayers;
+function removeTourneyPlayer() {}
+window.removeTourneyPlayer = removeTourneyPlayer;
+function loadRosterIntoPlayers() {}
+window.loadRosterIntoPlayers = loadRosterIntoPlayers;
 
 /* ─────────────────────────────────────────────────────────────
    §16  HISTORY
