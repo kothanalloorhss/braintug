@@ -102,7 +102,7 @@
         tourney: {
             id:             null,
             scope:          'single',   // 'single' or 'multi'
-            selectedClasses:[],         // array of class‑division strings, e.g. "5A"
+            selectedClasses:[],         // array of class‑division strings e.g. "5A"
             roster:         [],
             matchQueue:     [],
             currentMatch:   0,
@@ -284,7 +284,7 @@
     }
 
     /* ─────────────────────────────────────────────────────────────
-       §7  DAILY SETUP WIZARD  (unchanged)
+       §7  DAILY SETUP WIZARD
        ───────────────────────────────────────────────────────────── */
     function runSetup(force = false) {
         const today     = new Date().toDateString();
@@ -358,7 +358,7 @@
     }
 
     /* ─────────────────────────────────────────────────────────────
-       §8  HIDDEN DASHBOARD TRIGGER  (unchanged)
+       §8  HIDDEN DASHBOARD TRIGGER
        ───────────────────────────────────────────────────────────── */
     function onTitleClick() {
         STATE.titleClickCount++;
@@ -373,7 +373,7 @@
     }
 
     /* ─────────────────────────────────────────────────────────────
-       §9  KEYBOARD PRE-CHECK  (unchanged)
+       §9  KEYBOARD PRE-CHECK
        ───────────────────────────────────────────────────────────── */
     function runKbdPreCheck(onSuccess) {
         STATE.kbdCheck.active  = false;
@@ -417,6 +417,7 @@
     function renderKbdPreCheckUI() {
         const p1El  = get('kpc-p1-status');
         const p2El  = get('kpc-p2-status');
+        const btnEl = get('kpc-skip-btn');
         if (p1El) p1El.textContent  = STATE.kbdCheck.p1Ready ? '✓ READY' : 'Press A';
         if (p1El) p1El.className    = STATE.kbdCheck.p1Ready
             ? 'f-display text-2xl font-bold text-[var(--green)]'
@@ -437,7 +438,7 @@
     }
 
     /* ─────────────────────────────────────────────────────────────
-       §10  GAME MODE SELECTOR  (unchanged)
+       §10  GAME MODE SELECTOR
        ───────────────────────────────────────────────────────────── */
     const GAME_MODE = { mode: 'math' };
 
@@ -460,7 +461,7 @@
     }
 
     /* ─────────────────────────────────────────────────────────────
-       §11  ASSESSMENT MODE  (unchanged, only used for reference)
+       §11  ASSESSMENT MODE
        ───────────────────────────────────────────────────────────── */
     function setupAssessmentMode() {
         STATE.gameType = 'assessment';
@@ -501,17 +502,444 @@
         startNextAssessmentOp();
     }
 
-    // ... (all assessment functions remain exactly the same, omitted for brevity) ...
+    function showAssessmentScreen() {
+        showScreen('screen-assessment');
+    }
 
-    function finishAssessmentDone() { showScreen('screen-menu'); }
+    function startNextAssessmentOp() {
+        const as = STATE.assessment;
+        if (as.opIndex >= OPS_ORDER.length) {
+            finishAssessment();
+            return;
+        }
+
+        const op = OPS_ORDER[as.opIndex];
+        as.level             = 1;
+        as.consecutiveErrors = 0;
+        as.timesPerOp        = [];
+        as.timer             = 90;
+        as.active            = true;
+
+        if (STATE.profiles[as.studentId]) {
+            STATE.profiles[as.studentId].strikes = 0;
+        }
+
+        const opNames = { add: 'Addition', sub: 'Subtraction', mult: 'Multiplication', div: 'Division' };
+        get('assessment-op-name').textContent      = opNames[op];
+        get('assessment-op-icon').textContent      = opIcon(op);
+        get('assessment-level-label').textContent  = `Level ${as.level}`;
+        get('assessment-timer-el').textContent     = as.timer;
+        get('assessment-strikes-el').textContent   = '○○○';
+        get('assessment-answer-input').value       = '';
+        get('assessment-answer-input').focus();
+
+        renderAssessmentProgress();
+
+        generateAssessmentQuestion();
+
+        if (as.interval) clearInterval(as.interval);
+        as.interval = setInterval(assessmentTick, 1000);
+    }
+
+    function opIcon(op) {
+        return { add: '+', sub: '−', mult: '×', div: '÷' }[op];
+    }
+
+    function assessmentTick() {
+        const as = STATE.assessment;
+        if (!as.active) return;
+        as.timer--;
+        get('assessment-timer-el').textContent = as.timer;
+        if (as.timer <= 10) get('assessment-timer-el').classList.add('text-red-400');
+        if (as.timer <= 0) {
+            endAssessmentOp(as.level);
+        }
+    }
+
+    function generateAssessmentQuestion() {
+        const as  = STATE.assessment;
+        const op  = OPS_ORDER[as.opIndex];
+        const lvl = as.level;
+        let a, b, ans, text;
+
+        const single = () => Math.floor(Math.random() * 9) + 1;
+        const double = () => Math.floor(Math.random() * 90) + 10;
+        const triple = () => Math.floor(Math.random() * 900) + 100;
+
+        if (op === 'add') {
+            if (lvl === 1)      { a = single(); b = single(); }
+            else if (lvl === 2) { a = double(); b = double(); }
+            else                { a = triple(); b = double(); }
+            ans = a + b; text = `${a} + ${b}`;
+        } else if (op === 'sub') {
+            if (lvl === 1)      { a = single() + 5; b = single(); }
+            else if (lvl === 2) { a = double() + 10; b = single(); }
+            else                { a = double(); b = single(); }
+            if (a < b) [a, b] = [b, a];
+            ans = a - b; text = `${a} − ${b}`;
+        } else if (op === 'mult') {
+            if (lvl === 1)      { a = single(); b = single(); }
+            else if (lvl === 2) { a = double() % 20 + 2; b = single(); }
+            else                { a = single() + 5; b = single() + 5; }
+            ans = a * b; text = `${a} × ${b}`;
+        } else {
+            if (lvl === 1)      { b = single(); a = b * single(); }
+            else if (lvl === 2) { b = single() + 1; a = b * (Math.floor(Math.random() * 9) + 2); }
+            else                { b = single() + 2; a = b * (Math.floor(Math.random() * 11) + 3); }
+            ans = a / b; text = `${a} ÷ ${b}`;
+        }
+
+        as.q = { text, ans: Math.round(ans) };
+        as.startTime = Date.now();
+        get('assessment-question-text').textContent = text;
+        get('assessment-answer-input').value = '';
+    }
+
+    function submitAssessmentAnswer() {
+        const as  = STATE.assessment;
+        if (!as.active || !as.q) return;
+
+        const raw     = get('assessment-answer-input').value.trim();
+        const given   = parseInt(raw, 10);
+        const correct = as.q.ans;
+        const elapsed = Date.now() - as.startTime;
+
+        as.timesPerOp.push(elapsed);
+
+        if (given === correct) {
+            as.consecutiveErrors = 0;
+            flashAssessmentFeedback(true);
+
+            as.level = Math.min(as.level + 0.5, LEVELS_PER_OP);
+            const newLevel = Math.floor(as.level);
+            get('assessment-level-label').textContent = `Level ${newLevel}`;
+
+            if (as.level >= LEVELS_PER_OP) {
+                endAssessmentOp(LEVELS_PER_OP);
+                return;
+            }
+            generateAssessmentQuestion();
+
+        } else {
+            as.consecutiveErrors++;
+            const profile = STATE.profiles[as.studentId];
+            if (profile) profile.strikes++;
+            flashAssessmentFeedback(false);
+            renderAssessmentStrikes();
+
+            if (as.consecutiveErrors >= STRIKES_BEFORE_FAIL) {
+                endAssessmentOp(0);
+                return;
+            }
+            generateAssessmentQuestion();
+        }
+    }
+
+    function endAssessmentOp(levelAchieved) {
+        const as  = STATE.assessment;
+        as.active = false;
+        if (as.interval) { clearInterval(as.interval); as.interval = null; }
+
+        const op      = OPS_ORDER[as.opIndex];
+        const field   = opToField(op);
+        const profile = STATE.profiles[as.studentId];
+
+        if (profile) {
+            profile[field]       = levelAchieved;
+            profile.strikes      = 0;
+            profile.time_per_op  = [...(profile.time_per_op || []), ...as.timesPerOp];
+            saveProfiles();
+        }
+
+        as.opResults[op] = levelAchieved;
+        as.opIndex++;
+
+        showAssessmentOpResult(op, levelAchieved, () => {
+            startNextAssessmentOp();
+        });
+    }
+
+    function showAssessmentOpResult(op, level, next) {
+        const el = get('assessment-op-result');
+        if (!el) { next(); return; }
+
+        const opNames = { add: 'Addition', sub: 'Subtraction', mult: 'Multiplication', div: 'Division' };
+        const levelText = level === 0 ? 'Auto-Failed' : `Level ${level} Cleared`;
+        const colorCls  = level === 0 ? 'text-red-400' : 'text-[var(--green)]';
+        el.innerHTML = `
+            <div class="text-center py-6">
+                <div class="text-4xl mb-2">${opIcon(op)}</div>
+                <div class="f-display font-bold text-white text-2xl">${opNames[op]}</div>
+                <div class="f-display font-bold ${colorCls} text-3xl mt-1">${levelText}</div>
+            </div>`;
+        el.style.display = 'flex';
+        setTimeout(() => { el.style.display = 'none'; next(); }, 1800);
+    }
+
+    function flashAssessmentFeedback(correct) {
+        const fb = get('assessment-feedback');
+        if (!fb) return;
+        fb.textContent = correct ? '+GOOD' : 'MISS';
+        fb.className   = correct ? 'assessment-feedback text-[var(--green)]' : 'assessment-feedback text-[var(--red)]';
+        fb.style.opacity = '1';
+        setTimeout(() => { fb.style.opacity = '0'; }, 500);
+    }
+
+    function renderAssessmentStrikes() {
+        const as = STATE.assessment;
+        const el = get('assessment-strikes-el');
+        if (!el) return;
+        const filled = as.consecutiveErrors;
+        el.textContent = '●'.repeat(filled) + '○'.repeat(STRIKES_BEFORE_FAIL - filled);
+        el.className   = filled > 0 ? 'f-mono text-red-400 text-xl font-bold' : 'f-mono text-[var(--muted)] text-xl';
+    }
+
+    function renderAssessmentProgress() {
+        const el = get('assessment-progress-dots');
+        if (!el) return;
+        const opNames = { add: '+', sub: '−', mult: '×', div: '÷' };
+        el.innerHTML = OPS_ORDER.map((op, i) => {
+            let cls = 'w-8 h-8 rounded-full border-2 flex items-center justify-center f-display font-bold text-sm ';
+            if (i < STATE.assessment.opIndex)       cls += 'bg-[var(--green)] border-[var(--green)] text-black';
+            else if (i === STATE.assessment.opIndex) cls += 'bg-[var(--p1)] border-[var(--p1)] text-white';
+            else                                     cls += 'bg-transparent border-[var(--muted)] text-[var(--muted)]';
+            return `<div class="${cls}">${opNames[op]}</div>`;
+        }).join('');
+    }
+
+    function finishAssessment() {
+        if (STATE.assessment.interval) clearInterval(STATE.assessment.interval);
+        STATE.assessment.active = false;
+        renderAssessmentSummary();
+        showScreen('screen-assessment-done');
+    }
+
+    function renderAssessmentSummary() {
+        const profile = STATE.profiles[STATE.assessment.studentId];
+        const el      = get('assessment-summary-body');
+        if (!el || !profile) return;
+
+        const rows = OPS_ORDER.map(op => {
+            const lvl     = profile[opToField(op)];
+            const display = lvl === null ? '—' : lvl === 0 ? 'FAIL' : `L${lvl}`;
+            const color   = lvl === 0 ? 'text-red-400' : lvl === null ? 'text-[var(--muted)]' : 'text-[var(--green)]';
+            const opNames = { add: 'Addition', sub: 'Subtraction', mult: 'Multiplication', div: 'Division' };
+            return `<tr>
+                <td class="p-3 f-display text-white font-bold">${opIcon(op)} ${opNames[op]}</td>
+                <td class="p-3 f-mono ${color} font-bold text-center">${display}</td>
+            </tr>`;
+        }).join('');
+
+        el.innerHTML = rows;
+        get('assessment-done-name').textContent = profile.name;
+
+        const p2sec = get('p2-entry-section');
+        if (p2sec) p2sec.classList.remove('hidden');
+        const lbl = get('battle-p2-label');
+        if (lbl) lbl.style.display = '';
+    }
+
+    function finishAssessmentDone() {
+        showScreen('screen-menu');
+    }
 
     /* ─────────────────────────────────────────────────────────────
-       §12  BATTLE MODE — NAME ENTRY WITH AUTOCOMPLETE  (unchanged)
+       §12  BATTLE MODE — NAME ENTRY WITH AUTOCOMPLETE
        ───────────────────────────────────────────────────────────── */
-    // ... (all battle functions remain unchanged) ...
+    function setupBattleMode(isArcade = false) {
+        STATE.gameType         = isArcade ? 'arcade' : 'battle';
+        STATE.battle.isArcade  = isArcade;
+        STATE.battle.p1        = null;
+        STATE.battle.p2        = null;
+        STATE.battle.acFocusIndex = { p1: -1, p2: -1 };
+
+        const p2sec = get('p2-entry-section');
+        if (p2sec) p2sec.classList.remove('hidden');
+        const lbl = get('battle-p2-label');
+        if (lbl) lbl.style.display = '';
+        const titleEl = get('battle-entry-title');
+        if (titleEl) titleEl.textContent = isArcade ? 'Arcade Mode' : 'Battle Mode';
+        const subEl = get('battle-entry-sub');
+        if (subEl) subEl.textContent = isArcade
+            ? 'No data saved · Select operations below'
+            : 'Enter your names to find your profiles';
+        const startBtn = get('btn-start-battle');
+        if (startBtn) { startBtn.textContent = isArcade ? 'PLAY!' : 'FIGHT!'; startBtn.onclick = startBattleGame; }
+
+        const arcadeOpsEl = get('arcade-ops-selector');
+        if (arcadeOpsEl) arcadeOpsEl.style.display = isArcade ? 'flex' : 'none';
+
+        get('p1-name-input').value = '';
+        get('p2-name-input').value = '';
+        closeAutocomplete('p1');
+        closeAutocomplete('p2');
+        get('p1-selected-card').classList.add('hidden');
+        get('p2-selected-card').classList.add('hidden');
+        get('btn-start-battle').disabled = true;
+
+        showScreen('screen-battle-entry');
+        get('p1-name-input').focus();
+    }
+
+    function setupArcadeMode() { setupBattleMode(true); }
+
+    function toggleArcadeOp(op) {
+        STATE.battle.arcadeOps[op] = !STATE.battle.arcadeOps[op];
+        const el = get(`arcade-op-${op}`);
+        if (el) el.classList.toggle('op-active', STATE.battle.arcadeOps[op]);
+        const anyOn = Object.values(STATE.battle.arcadeOps).some(Boolean);
+        if (!anyOn) {
+            STATE.battle.arcadeOps[op] = true;
+            if (el) el.classList.add('op-active');
+        }
+    }
+
+    function onNameInput(player) {
+        const input = get(`${player}-name-input`);
+        const query = input.value;
+        if (STATE.battle[player]) {
+            STATE.battle[player] = null;
+            get(`${player}-selected-card`).classList.add('hidden');
+            updateStartBattleButton();
+        }
+        if (query.length === 0) { closeAutocomplete(player); return; }
+        renderAutocomplete(player, searchStudents(query), query);
+    }
+
+    function onNameKeydown(event, player) {
+        const list  = get(`${player}-ac-list`);
+        const items = list.querySelectorAll('.ac-item');
+        let   idx   = STATE.battle.acFocusIndex[player];
+
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            idx = Math.min(idx + 1, items.length - 1);
+            STATE.battle.acFocusIndex[player] = idx;
+            highlightAcItem(items, idx);
+        } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            idx = Math.max(idx - 1, 0);
+            STATE.battle.acFocusIndex[player] = idx;
+            highlightAcItem(items, idx);
+        } else if (event.key === 'Enter') {
+            event.preventDefault();
+            if (idx >= 0 && items[idx]) items[idx].click();
+            else confirmFreeText(player);
+        } else if (event.key === 'Escape') {
+            closeAutocomplete(player);
+        } else if (event.key === 'Tab') {
+            closeAutocomplete(player);
+        }
+    }
+
+    function highlightAcItem(items, idx) {
+        items.forEach(el => el.classList.remove('focused'));
+        if (items[idx]) { items[idx].classList.add('focused'); items[idx].scrollIntoView({ block: 'nearest' }); }
+    }
+
+    function renderAutocomplete(player, results, query) {
+        const list = get(`${player}-ac-list`);
+        STATE.battle.acFocusIndex[player] = -1;
+        if (results.length === 0) { closeAutocomplete(player); return; }
+
+        const ql = query.toLowerCase();
+        list.innerHTML = results.map((s, i) => {
+            const nl  = s.name.toLowerCase();
+            const ms  = nl.indexOf(ql);
+            let   dn  = s.name;
+            if (ms !== -1) dn = s.name.slice(0, ms)
+                + `<span class="ac-highlight">${s.name.slice(ms, ms + query.length)}</span>`
+                + s.name.slice(ms + query.length);
+            const g = s.gender === 'F' ? '♀' : '♂';
+
+            const sid = buildStudentId(s.name, s.class);
+            const p   = STATE.profiles[sid];
+            const levelBadge = p
+                ? `<span class="ac-level-badge">${opIcon('add')}${p.addition_level ?? '?'} ${opIcon('sub')}${p.subtraction_level ?? '?'}</span>`
+                : '';
+
+            return `<div class="ac-item" onclick="selectStudent('${player}', ${STATE.students.indexOf(s)})">
+                <span class="ac-name">${dn}</span>
+                <span class="ac-meta">Cls ${s.class}${s.division} ${g} ${levelBadge}</span>
+            </div>`;
+        }).join('');
+        list.classList.add('open');
+    }
+
+    function closeAutocomplete(player) {
+        const list = get(`${player}-ac-list`);
+        if (list) { list.classList.remove('open'); list.innerHTML = ''; }
+        STATE.battle.acFocusIndex[player] = -1;
+    }
+
+    function selectStudent(player, studentIndex) {
+        const student = STATE.students[studentIndex];
+        if (!student) return;
+        STATE.battle[player] = student;
+        get(`${player}-name-input`).value = student.name;
+        closeAutocomplete(player);
+
+        const card = get(`${player}-selected-card`);
+        get(`${player}-sc-init`).textContent = student.name.charAt(0).toUpperCase();
+        get(`${player}-sc-name`).textContent = student.name;
+        const g    = student.gender === 'F' ? '♀' : '♂';
+        const sid  = buildStudentId(student.name, student.class);
+        const p    = STATE.profiles[sid];
+        const lvls = p ? `| +${p.addition_level ?? '?'} −${p.subtraction_level ?? '?'} ×${p.multiplication_level ?? '?'} ÷${p.division_level ?? '?'}` : '';
+        get(`${player}-sc-meta`).textContent = `Class ${student.class} · Div ${student.division} · ${g} ${lvls}`;
+        card.classList.remove('hidden');
+        updateStartBattleButton();
+    }
+
+    function confirmFreeText(player) {
+        const val = get(`${player}-name-input`).value.trim();
+        if (!val) return;
+        closeAutocomplete(player);
+        const results = searchStudents(val);
+        if (results.length === 1) { selectStudent(player, STATE.students.indexOf(results[0])); return; }
+        STATE.battle[player] = { name: val, class: '?', division: '?', gender: '?' };
+        get(`${player}-sc-init`).textContent = val.charAt(0).toUpperCase();
+        get(`${player}-sc-name`).textContent = val;
+        get(`${player}-sc-meta`).textContent = 'Guest Player';
+        get(`${player}-selected-card`).classList.remove('hidden');
+        updateStartBattleButton();
+    }
+
+    function clearPlayerSelection(player) {
+        STATE.battle[player] = null;
+        get(`${player}-name-input`).value = '';
+        get(`${player}-selected-card`).classList.add('hidden');
+        closeAutocomplete(player);
+        updateStartBattleButton();
+        get(`${player}-name-input`).focus();
+    }
+
+    function updateStartBattleButton() {
+        const btn  = get('btn-start-battle');
+        const p1ok = STATE.battle.p1 !== null || get('p1-name-input').value.trim().length > 0;
+        const p2ok = STATE.gameType === 'assessment'
+            ? true
+            : (STATE.battle.p2 !== null || get('p2-name-input').value.trim().length > 0);
+        if (btn) btn.disabled = !(p1ok && p2ok);
+    }
+
+    function startBattleGame() {
+        if (!STATE.battle.p1) confirmFreeText('p1');
+        if (STATE.gameType !== 'assessment' && !STATE.battle.p2) confirmFreeText('p2');
+
+        const p1 = STATE.battle.p1;
+        const p2 = STATE.battle.p2;
+        if (!p1) { alert('Player 1 must enter a name.'); return; }
+        if (STATE.gameType !== 'assessment' && !p2) { alert('Player 2 must enter a name.'); return; }
+        if (STATE.gameType !== 'assessment' && p1.name === p2.name) {
+            alert('Both players cannot have the same name.'); return;
+        }
+
+        runKbdPreCheck(() => prepareGame(p1.name, p2.name));
+    }
 
     /* ─────────────────────────────────────────────────────────────
-       §13  ADMIN / COMPETITION ACCESS  (unchanged)
+       §13  ADMIN / COMPETITION ACCESS
        ───────────────────────────────────────────────────────────── */
     function startCompetitionSetup() {
         get('admin-pass-input').value = '';
@@ -544,7 +972,7 @@
     }
 
     /* ─────────────────────────────────────────────────────────────
-       §14  TOURNAMENT — STEP 1: SCOPE SELECTION  (UPDATED)
+       §14  TOURNAMENT — STEP 1: SCOPE SELECTION
        ───────────────────────────────────────────────────────────── */
     function launchTournamentSetup() {
         STATE.gameType = 'tournament';
@@ -593,7 +1021,7 @@
     }
 
     /* ─────────────────────────────────────────────────────────────
-       §14b  TOURNAMENT — STEP 2: ROSTER BUILDER  (UPDATED)
+       §14b  TOURNAMENT — STEP 2: ROSTER BUILDER
        ───────────────────────────────────────────────────────────── */
     /** Render class‑division chips based on unique combinations in students.json */
     function renderClassChips() {
@@ -730,10 +1158,11 @@
     }
 
     /* ─────────────────────────────────────────────────────────────
-       §14c  TOURNAMENT — STEP 3: MATCH ORDER  (unchanged)
+       §14c  TOURNAMENT — STEP 3: MATCH ORDER
        ───────────────────────────────────────────────────────────── */
     function buildMatchQueue(players) {
         const sorted = [...players].sort((a, b) => getOverallLevel(a.studentId) - getOverallLevel(b.studentId));
+
         const queue = [];
         let i = 0;
         while (i < sorted.length - 1) {
@@ -751,6 +1180,7 @@
             queue.push({ p1: bye.name, p2: 'BYE', winner: bye.name, levelDiff: 0,
                          p1Id: bye.studentId, p2Id: null });
         }
+
         STATE.tourney.matchQueue   = queue;
         STATE.tourney.currentMatch = 0;
     }
@@ -799,13 +1229,14 @@
             if (m.p2 === 'BYE') { m.winner = m.p1; STATE.tourney.currentMatch++; }
             else break;
         }
+
         saveTournament();
         renderLiveHub();
         showScreen('screen-tourney-hub');
     }
 
     /* ─────────────────────────────────────────────────────────────
-       §15  TOURNAMENT — LIVE HUB  (unchanged, but uses roster data)
+       §15  TOURNAMENT — LIVE HUB
        ───────────────────────────────────────────────────────────── */
     function renderLiveHub() {
         const queue   = STATE.tourney.matchQueue;
@@ -889,6 +1320,7 @@
                 <div class="text-[var(--p2)] f-display font-bold text-xs uppercase tracking-widest mb-1 animate-pulse">
                     Match ${current + 1} · Up Now
                 </div>
+
                 <div class="my-4 flex flex-col gap-3">
                     <div class="p-3 rounded-xl bg-[var(--p1)]/10 border border-[var(--p1)]/20">
                         <div class="f-display font-bold text-[#818CF8] text-2xl">${match.p1}</div>
@@ -900,6 +1332,7 @@
                         <div class="text-[var(--muted)] text-[10px] f-mono mt-0.5">Level ${p2Lvl}</div>
                     </div>
                 </div>
+
                 <button onclick="runKbdPreCheck(() => prepareGame('${match.p1}', '${match.p2}'))"
                     class="btn-primary w-full mb-2">
                     <i class="fas fa-bolt mr-2"></i>START MATCH
@@ -931,6 +1364,7 @@
         const queue   = STATE.tourney.matchQueue;
         const current = STATE.tourney.currentMatch;
         if (current >= queue.length) return;
+
         queue[current].winner = winner;
 
         STATE.tourney.currentMatch++;
@@ -974,7 +1408,7 @@
         showScreen('screen-menu');
     }
 
-    // Legacy stubs (unchanged)
+    // Legacy stubs
     function generateBracket() { confirmRoster(); }
     function setActiveMatch() {}
     function addTourneyPlayer() {}
@@ -983,7 +1417,7 @@
     function loadRosterIntoPlayers() {}
 
     /* ─────────────────────────────────────────────────────────────
-       §16  HISTORY  (unchanged)
+       §16  HISTORY
        ───────────────────────────────────────────────────────────── */
     function showHistory() {
         const list = get('history-list');
@@ -1011,7 +1445,7 @@
     }
 
     /* ─────────────────────────────────────────────────────────────
-       §17  TEACHER DASHBOARD  (unchanged – already shows class+division)
+       §17  TEACHER DASHBOARD
        ───────────────────────────────────────────────────────────── */
     function updateMatchStats(name, isCorrect, timeTakenMs) {
         if (!name || name === '?' || name.startsWith('Player') || name === 'ASSESSMENT') return;
@@ -1136,12 +1570,517 @@
     }
 
     /* ─────────────────────────────────────────────────────────────
-       §18–§24  GAME LIFECYCLE, QUESTIONS, TUG, END  (unchanged)
+       §18  GAME LIFECYCLE — PREPARE & COUNTDOWN
        ───────────────────────────────────────────────────────────── */
-    // ... (prepareGame, startGame, generateQuestion, handleInput, etc.) ...
+    function prepareGame(p1Name, p2Name) {
+        if (STATE.game.interval) { clearInterval(STATE.game.interval); STATE.game.interval = null; }
+        AUDIO.stopBGM();
+
+        let difficulty = 1;
+        if (STATE.gameType === 'tournament') {
+            const roundsLeft = STATE.tourney.bracket.length - 1 - STATE.tourney.activeRound;
+            if (roundsLeft <= 0)      difficulty = 4;
+            else if (roundsLeft <= 1) difficulty = 3;
+            else if (roundsLeft <= 2) difficulty = 2;
+        }
+
+        STATE.game.active      = false;
+        STATE.game.timer       = 60;
+        STATE.game.tugValue    = 50;
+        STATE.game.suddenDeath = false;
+        STATE.game.difficulty  = difficulty;
+        STATE.game.p1          = createPlayerState(p1Name);
+        STATE.game.p2          = createPlayerState(p2Name);
+
+        layoutGameZones();
+        resetGameUI();
+        showScreen('screen-game');
+        runCountdown();
+    }
+
+    function createPlayerState(name) {
+        return {
+            name, score: 0, streak: 0, frozen: false,
+            processing: false, ans: '', q: null,
+            wrongTimes: [], startTime: 0
+        };
+    }
+
+    function layoutGameZones() {
+        const isLandscape = window.innerWidth >= 1024;
+        const zone1   = get('zone-p1');
+        const zone2   = get('zone-p2');
+        const divider = get('rope-divider');
+        if (isLandscape) {
+            if (zone1)   zone1.style.cssText   = 'position:absolute;top:0;left:0;bottom:0;right:50%;';
+            if (zone2)   zone2.style.cssText   = 'position:absolute;top:0;left:50%;bottom:0;right:0;';
+            if (divider) divider.className     = 'rope-divider v';
+        } else {
+            if (zone1)   zone1.style.cssText   = 'position:absolute;top:0;left:0;right:0;bottom:50%;';
+            if (zone2)   zone2.style.cssText   = 'position:absolute;top:50%;left:0;right:0;bottom:0;';
+            if (divider) divider.className     = 'rope-divider h';
+        }
+    }
+
+    window.addEventListener('resize', () => {
+        if (STATE.game.active) { layoutGameZones(); updateTugVisuals(); }
+    });
+
+    function resetGameUI() {
+        const p1 = STATE.game.p1, p2 = STATE.game.p2;
+
+        const p1name  = get('p1-name');    if (p1name)  p1name.textContent  = p1.name;
+        const p1score = get('p1-score');   if (p1score) p1score.textContent = '0';
+        const p1av    = get('p1-avatar-txt'); if (p1av) p1av.textContent    = p1.name.charAt(0).toUpperCase();
+
+        const p2name  = get('p2-name');    if (p2name)  p2name.textContent  = p2.name;
+        const p2score = get('p2-score');   if (p2score) p2score.textContent = '0';
+        const p2av    = get('p2-avatar-txt'); if (p2av) p2av.textContent    = p2.name.charAt(0).toUpperCase();
+
+        ['p1', 'p2'].forEach(pl => {
+            const inp   = get(`${pl}-input`);    if (inp)   inp.textContent    = '';
+            const combo = get(`${pl}-combo`);    if (combo) combo.style.display = 'none';
+            const froz  = get(`${pl}-frozen`);   if (froz)  froz.style.display = 'none';
+            const qtxt  = get(`${pl}-q-text`);   if (qtxt)  qtxt.textContent   = '…';
+            const opts  = get(`${pl}-eng-opts`); if (opts)  opts.classList.add('hidden');
+            clearFeedback(pl);
+        });
+
+        const pill = get('timer-pill');
+        if (pill) pill.classList.remove('danger', 'sd');
+        const timerEl = get('game-timer');
+        if (timerEl) timerEl.textContent = '60';
+
+        const ws = get('screen-winner');
+        if (ws) ws.style.display = 'none';
+
+        updateTugVisuals();
+    }
+
+    function clearFeedback(player) {
+        const fb = get(`${player}-feedback`);
+        if (fb) { fb.textContent = ''; fb.style.opacity = '0'; }
+    }
+
+    function runCountdown() {
+        const overlay = get('countdown-overlay');
+        const text    = get('countdown-text');
+        if (overlay) overlay.style.display = 'flex';
+        let count = 3;
+        if (text) { text.textContent = count; text.className = 'countdown-num'; }
+        AUDIO.playCountdown();
+
+        const tick = setInterval(() => {
+            count--;
+            if (count > 0) {
+                if (text) { text.textContent = count; text.className = 'countdown-num'; }
+            } else if (count === 0) {
+                if (text) { text.textContent = 'FIGHT!'; text.className = 'countdown-fight'; }
+                AUDIO.playWin();
+            } else {
+                clearInterval(tick);
+                if (overlay) overlay.style.display = 'none';
+                startGame();
+            }
+        }, COUNTDOWN_TICK_MS);
+    }
 
     /* ─────────────────────────────────────────────────────────────
-       §25  OUTSIDE-CLICK → CLOSE AUTOCOMPLETE  (unchanged)
+       §19  GAME TICK & SUDDEN DEATH
+       ───────────────────────────────────────────────────────────── */
+    function startGame() {
+        STATE.game.active = true;
+        AUDIO.playBGM();
+        generateQuestion('p1');
+        generateQuestion('p2');
+        STATE.game.interval = setInterval(gameTick, 1000);
+    }
+
+    function gameTick() {
+        if (!STATE.game.active) return;
+        STATE.game.timer--;
+        const timerEl = get('game-timer');
+        const pill    = get('timer-pill');
+
+        if (STATE.game.suddenDeath) {
+            if (timerEl) timerEl.textContent = 'SD!';
+            if (pill)    pill.classList.add('sd');
+        } else {
+            if (timerEl) timerEl.textContent = STATE.game.timer;
+            if (STATE.game.timer <= 10 && pill) pill.classList.add('danger');
+            if (STATE.game.timer > 0
+                && STATE.game.timer % DIFFICULTY_RAMP_SECS === 0
+                && STATE.game.difficulty < 5) {
+                STATE.game.difficulty++;
+            }
+            if (STATE.game.timer <= 0) {
+                if (STATE.game.tugValue === 50) triggerSuddenDeath();
+                else                            endGame('TIME_UP');
+            }
+        }
+    }
+
+    function triggerSuddenDeath() {
+        STATE.game.suddenDeath = true;
+        STATE.game.timer       = 9999;
+        AUDIO.playWrong();
+        const overlay = get('countdown-overlay');
+        const text    = get('countdown-text');
+        if (overlay) overlay.style.display = 'flex';
+        if (text)    { text.textContent = 'SUDDEN DEATH!'; text.className = 'countdown-fight'; }
+        setTimeout(() => { if (overlay) overlay.style.display = 'none'; }, 1800);
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       §20  QUESTION ENGINE
+       ───────────────────────────────────────────────────────────── */
+    const ENG_WORDS = [
+        { f:'APPLE',  m:'A_PLE',  a:2, o:['R','P','S'] }, { f:'TIGER',  m:'TI_ER',  a:3, o:['A','I','G'] },
+        { f:'HOUSE',  m:'HO_SE',  a:1, o:['U','A','E'] }, { f:'WATER',  m:'WA_ER',  a:3, o:['P','D','T'] },
+        { f:'ROBOT',  m:'ROB_T',  a:3, o:['A','I','O'] }, { f:'MUSIC',  m:'MUS_C',  a:2, o:['K','I','E'] },
+        { f:'PHONE',  m:'PH_NE',  a:3, o:['A','U','O'] }, { f:'EARTH',  m:'E_RTH',  a:1, o:['A','O','U'] },
+        { f:'MONEY',  m:'MON_Y',  a:2, o:['I','E','A'] }, { f:'RIVER',  m:'RIV_R',  a:2, o:['A','E','I'] },
+        { f:'STONE',  m:'ST_NE',  a:2, o:['A','O','I'] }, { f:'HAPPY',  m:'HA_PY',  a:1, o:['P','B','D'] },
+        { f:'GREEN',  m:'GR_EN',  a:3, o:['I','A','E'] }, { f:'NIGHT',  m:'NI_HT',  a:1, o:['G','F','H'] },
+        { f:'PIZZA',  m:'PI_ZA',  a:2, o:['S','Z','X'] }, { f:'TRAIN',  m:'TR_IN',  a:2, o:['E','A','I'] },
+        { f:'GHOST',  m:'GH_ST',  a:3, o:['A','I','O'] }, { f:'MOUSE',  m:'MO_SE',  a:2, o:['O','U','A'] },
+        { f:'CLOCK',  m:'CL_CK',  a:2, o:['A','O','U'] }, { f:'SPACE',  m:'SP_CE',  a:3, o:['E','I','A'] },
+        { f:'WORLD',  m:'WO_LD',  a:1, o:['R','L','D'] }, { f:'TABLE',  m:'TA_LE',  a:2, o:['P','B','D'] },
+        { f:'FLOOR',  m:'FL_OR',  a:2, o:['A','O','U'] }, { f:'SHOES',  m:'SH_ES',  a:1, o:['O','A','I'] },
+        { f:'FRUIT',  m:'FR_IT',  a:3, o:['O','I','U'] }, { f:'GRAPE',  m:'GR_PE',  a:3, o:['E','I','A'] },
+        { f:'BREAD',  m:'BR_AD',  a:3, o:['E','I','O'] }, { f:'CLOUD',  m:'CL_UD',  a:3, o:['O','A','U'] },
+        { f:'DREAM',  m:'DR_AM',  a:3, o:['E','A','I'] }, { f:'FLAME',  m:'FL_ME',  a:3, o:['A','O','I'] },
+        { f:'GLOBE',  m:'GL_BE',  a:3, o:['O','A','I'] }, { f:'PLANT',  m:'PL_NT',  a:3, o:['A','O','I'] },
+        { f:'SMILE',  m:'SM_LE',  a:2, o:['I','O','A'] }, { f:'STORM',  m:'ST_RM',  a:3, o:['O','A','U'] },
+        { f:'SWORD',  m:'SW_RD',  a:3, o:['O','A','U'] }, { f:'TOWER',  m:'T_WER',  a:1, o:['O','A','E'] },
+        { f:'TRIBE',  m:'TR_BE',  a:2, o:['I','A','O'] }, { f:'VOICE',  m:'VO_CE',  a:2, o:['I','A','O'] },
+        { f:'WHEEL',  m:'WH_EL',  a:3, o:['E','A','O'] }, { f:'YOUTH',  m:'Y_UTH',  a:1, o:['O','A','U'] },
+    ];
+
+    function rand(n) { return Math.floor(Math.random() * n) + 1; }
+
+    function generateQuestion(player) {
+        const diff = STATE.game.difficulty;
+        const q    = GAME_MODE.mode === 'math'
+            ? generateMathQuestion(diff)
+            : generateEnglishQuestion();
+        STATE.game[player].q         = q;
+        STATE.game[player].startTime = Date.now();
+        STATE.game[player].ans       = '';
+        renderQuestion(player, q);
+    }
+
+    function generateMathQuestion(diff) {
+        const r          = Math.random();
+        const isArcade   = STATE.gameType === 'arcade';
+        const activeOps  = isArcade
+            ? OPS_ORDER.filter(o => STATE.battle.arcadeOps[o])
+            : null;
+
+        let chosenOp;
+        if (activeOps && activeOps.length > 0) {
+            chosenOp = activeOps[Math.floor(Math.random() * activeOps.length)];
+        } else {
+            if (diff <= 1)      chosenOp = r > 0.5  ? 'add'  : 'sub';
+            else if (diff <= 2) chosenOp = r > 0.55 ? 'mult' : 'add';
+            else if (diff <= 3) chosenOp = r < 0.3  ? 'div'  : r < 0.6 ? 'mult' : 'sub';
+            else if (diff <= 4) chosenOp = r < 0.35 ? 'div'  : r < 0.65 ? 'mult' : 'add';
+            else                chosenOp = r < 0.4  ? 'mult' : 'add';
+        }
+
+        const single = () => Math.floor(Math.random() * 9) + 1;
+        const double = () => Math.floor(Math.random() * 90) + 10;
+        let a, b, op, ans;
+
+        if (chosenOp === 'add') {
+            if (diff <= 1)      { a = single(); b = single(); }
+            else if (diff <= 3) { a = double(); b = double(); }
+            else                { a = double() + 50; b = double(); }
+            ans = a + b; op = '+';
+        } else if (chosenOp === 'sub') {
+            if (diff <= 1)      { a = single() + 5; b = single(); }
+            else if (diff <= 3) { a = double() + 10; b = double() % 30 + 5; }
+            else                { a = double() + 30; b = double(); }
+            if (a < b) [a, b] = [b, a];
+            ans = a - b; op = '−';
+        } else if (chosenOp === 'mult') {
+            if (diff <= 2)      { a = single(); b = single(); }
+            else if (diff <= 4) { a = single() + 2; b = single() + 2; }
+            else                { a = rand(15) + 5; b = rand(15) + 5; }
+            ans = a * b; op = '×';
+        } else {
+            if (diff <= 2)      { b = single(); a = b * single(); }
+            else if (diff <= 4) { b = single() + 1; a = b * (rand(9) + 2); }
+            else                { b = single() + 2; a = b * (rand(11) + 3); }
+            ans = a / b; op = '÷';
+        }
+
+        return { type: 'math', text: `${a} ${op} ${b}`, ans: Math.round(ans) };
+    }
+
+    function generateEnglishQuestion() {
+        const word = ENG_WORDS[Math.floor(Math.random() * ENG_WORDS.length)];
+        return { type: 'eng', text: word.m, ans: word.a, opts: word.o };
+    }
+
+    function renderQuestion(player, q) {
+        const qtxt  = get(`${player}-q-text`);
+        const inp   = get(`${player}-input`);
+        const opts  = get(`${player}-eng-opts`);
+        if (qtxt) qtxt.textContent = q.text;
+        if (inp)  inp.textContent  = '';
+        if (!opts) return;
+
+        if (q.type === 'eng') {
+            opts.classList.remove('hidden');
+            const cc = player === 'p1' ? 'eng-opt-p1' : 'eng-opt-p2';
+            opts.innerHTML = q.opts.map((opt, i) =>
+                `<div class="eng-opt ${cc}" onclick="tapInput('${player}','${i + 1}')">
+                    <span class="text-[var(--muted)] text-[10px]">${i + 1}.</span> ${opt}
+                </div>`).join('');
+        } else {
+            opts.classList.add('hidden');
+        }
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       §21  INPUT HANDLING & VALIDATION
+       ───────────────────────────────────────────────────────────── */
+    document.addEventListener('keydown', (e) => {
+        if (STATE.assessment.active) return;
+        if (STATE.kbdCheck.active)   return;
+        if (!STATE.game.active)      return;
+
+        const k        = e.key;
+        const isDigit  = /^[0-9]$/.test(k);
+        const isNumpad = e.code.startsWith('Numpad') && isDigit;
+        const isTopRow = e.code.startsWith('Digit')  && isDigit;
+
+        if (isTopRow && !STATE.game.p1.frozen) handleInput('p1', k);
+        if (e.code === 'KeyS')                clearInput('p1');
+
+        if (isNumpad && !STATE.game.p2.frozen) handleInput('p2', k);
+        if (e.code === 'Backspace')           clearInput('p2');
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (!STATE.assessment.active) return;
+        if (e.key === 'Enter') { e.preventDefault(); submitAssessmentAnswer(); }
+    });
+
+    function tapInput(player, char) {
+        if (!STATE.game.active) return;
+        if (STATE.game[player].frozen) return;
+        handleInput(player, char);
+    }
+
+    function tapClear(player) {
+        if (STATE.game.active) clearInput(player);
+    }
+
+    function handleInput(player, char) {
+        const ps = STATE.game[player];
+        if (ps.frozen || ps.processing) return;
+        const q = ps.q;
+        if (!q) return;
+        ps.ans += char;
+        const inp = get(`${player}-input`);
+        if (inp) inp.textContent = ps.ans;
+        if (ps.ans.length >= q.ans.toString().length) {
+            ps.processing = true;
+            setTimeout(() => validate(player), 60);
+        }
+    }
+
+    function clearInput(player) {
+        STATE.game[player].ans = '';
+        const inp = get(`${player}-input`);
+        if (inp) inp.textContent = '';
+    }
+
+    function validate(player) {
+        const ps      = STATE.game[player];
+        const given   = parseInt(ps.ans, 10);
+        const correct = ps.q.ans;
+        const elapsed = Date.now() - ps.startTime;
+
+        if (given === correct) onCorrectAnswer(player, elapsed);
+        else                   onWrongAnswer(player, elapsed);
+
+        setTimeout(() => {
+            ps.processing = false;
+            clearInput(player);
+            generateQuestion(player);
+        }, FEEDBACK_VISIBLE_MS);
+    }
+
+    function onCorrectAnswer(player, elapsed) {
+        const ps = STATE.game[player];
+        ps.score++;
+        ps.streak++;
+
+        if (STATE.gameType !== 'arcade') updateMatchStats(ps.name, true, elapsed);
+
+        const scoreEl = get(`${player}-score`);
+        if (scoreEl) scoreEl.textContent = ps.score;
+        AUDIO.playCorrect();
+        flashFeedback(`${player}-feedback`, '+GOOD', 'feedback-flash text-[var(--green)]');
+
+        if (ps.streak >= 3) {
+            const c = get(`${player}-combo`);
+            if (c) c.style.display = 'inline-flex';
+        }
+
+        let power = 8;
+        if (ps.streak >= 3) power = 14;
+        if (ps.streak >= 6) power = 18;
+        if (player === 'p1' && STATE.game.tugValue > 72) power += 6;
+        if (player === 'p2' && STATE.game.tugValue < 28) power += 6;
+
+        if (power > 12) {
+            document.body.classList.add('shake');
+            setTimeout(() => document.body.classList.remove('shake'), 450);
+        }
+        moveTug(player, power);
+    }
+
+    function onWrongAnswer(player, elapsed) {
+        const ps  = STATE.game[player];
+        const opp = player === 'p1' ? 'p2' : 'p1';
+        ps.streak = 0;
+        const c = get(`${player}-combo`);
+        if (c) c.style.display = 'none';
+
+        if (STATE.gameType !== 'arcade') updateMatchStats(ps.name, false, elapsed);
+
+        AUDIO.playWrong();
+        flashFeedback(`${player}-feedback`, 'MISS', 'feedback-flash text-[var(--red)]');
+        moveTug(opp, 4);
+
+        const now = Date.now();
+        ps.wrongTimes.push(now);
+        if (ps.wrongTimes.length > WRONG_SPAM_COUNT) ps.wrongTimes.shift();
+        if (ps.wrongTimes.length === WRONG_SPAM_COUNT) {
+            const window = ps.wrongTimes[WRONG_SPAM_COUNT - 1] - ps.wrongTimes[0];
+            if (window < WRONG_SPAM_WINDOW_MS) {
+                freezePlayer(player);
+                ps.wrongTimes = [];
+            }
+        }
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       §22  TUG-OF-WAR PHYSICS & VISUALS
+       ───────────────────────────────────────────────────────────── */
+    function moveTug(puller, amount) {
+        if (puller === 'p1') STATE.game.tugValue -= amount;
+        else                 STATE.game.tugValue += amount;
+        STATE.game.tugValue = Math.max(0, Math.min(TUG_WIN_THRESHOLD, STATE.game.tugValue));
+        updateTugVisuals();
+        if (STATE.game.tugValue <= 0)                      endGame('P1_WIN');
+        else if (STATE.game.tugValue >= TUG_WIN_THRESHOLD) endGame('P2_WIN');
+    }
+
+    function updateTugVisuals() {
+        const tug    = STATE.game.tugValue;
+        const marker = get('rope-marker');
+        const pctEl  = get('rope-pct');
+        if (!marker) return;
+
+        const zone1 = get('zone-p1'), zone2 = get('zone-p2');
+        if (zone1 && zone2) {
+            if (tug < 40) {
+                zone1.style.background = 'radial-gradient(ellipse 80% 60% at 50% 120%, rgba(79,70,229,0.18) 0%, transparent 70%)';
+                zone2.style.background = 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(245,158,11,0.04) 0%, transparent 70%)';
+            } else if (tug > 60) {
+                zone1.style.background = 'radial-gradient(ellipse 80% 60% at 50% 120%, rgba(79,70,229,0.04) 0%, transparent 70%)';
+                zone2.style.background = 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(245,158,11,0.18) 0%, transparent 70%)';
+            } else {
+                zone1.style.background = 'radial-gradient(ellipse 80% 60% at 50% 120%, rgba(79,70,229,0.08) 0%, transparent 70%)';
+                zone2.style.background = 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(245,158,11,0.08) 0%, transparent 70%)';
+            }
+        }
+
+        const offset      = (tug - 50) * 0.9;
+        const isLandscape = window.innerWidth >= 1024;
+        marker.style.left      = '50%';
+        marker.style.top       = '50%';
+        marker.style.transform = isLandscape
+            ? `translate(calc(-50% + ${offset}vw), -50%)`
+            : `translate(-50%, calc(-50% + ${offset}vh))`;
+
+        if (pctEl) pctEl.textContent = Math.round(tug);
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       §23  FREEZE MECHANIC
+       ───────────────────────────────────────────────────────────── */
+    function freezePlayer(player) {
+        const ps = STATE.game[player];
+        ps.frozen = true;
+        const ov = get(`${player}-frozen`);
+        if (ov) ov.style.display = 'flex';
+        setTimeout(() => {
+            ps.frozen = false;
+            if (ov) ov.style.display = 'none';
+        }, FREEZE_DURATION_MS);
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       §24  GAME END & WINNER SCREEN
+       ───────────────────────────────────────────────────────────── */
+    function endGame(reason) {
+        if (!STATE.game.active) return;
+        STATE.game.active = false;
+        clearInterval(STATE.game.interval);
+        STATE.game.interval = null;
+        AUDIO.stopBGM();
+
+        const p1 = STATE.game.p1, p2 = STATE.game.p2;
+        let winnerName, winReason;
+
+        switch (reason) {
+            case 'P1_WIN':
+                winnerName = p1.name;
+                winReason  = 'Knockout! Pulled to victory.';
+                break;
+            case 'P2_WIN':
+                winnerName = p2.name;
+                winReason  = 'Knockout! Pulled to victory.';
+                break;
+            case 'TIME_UP':
+                if      (STATE.game.tugValue < 50) { winnerName = p1.name; winReason = "Time's up — P1 had the edge!"; }
+                else if (STATE.game.tugValue > 50) { winnerName = p2.name; winReason = "Time's up — P2 had the edge!"; }
+                else                               { winnerName = 'DRAW';  winReason = 'Perfect tie!'; }
+                break;
+            default:
+                winnerName = reason;
+                winReason  = STATE.game.suddenDeath ? 'Sudden Death Victory!' : 'Victory!';
+        }
+
+        AUDIO.playWin();
+        if (winnerName !== 'DRAW') {
+            confetti({ particleCount: 220, spread: 110, origin: { y: 0.6 },
+                       colors: ['#4F46E5', '#F59E0B', '#10B981', '#fff'] });
+        }
+
+        const wn = get('winner-name');   if (wn)  wn.textContent  = winnerName;
+        const wr = get('winner-reason'); if (wr)  wr.textContent  = winReason;
+        const ws2= get('winner-scores'); if (ws2) ws2.textContent = `${p1.score * 10} – ${p2.score * 10}`;
+
+        const ws = get('screen-winner');
+        if (ws) ws.style.display = 'flex';
+
+        const btn = get('btn-winner-continue');
+        if (btn) btn.onclick = () => {
+            if (ws) ws.style.display = 'none';
+            if (STATE.gameType === 'tournament') handleTournamentWin(winnerName);
+            else                                showScreen('screen-menu');
+        };
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       §25  OUTSIDE-CLICK → CLOSE AUTOCOMPLETE
        ───────────────────────────────────────────────────────────── */
     document.addEventListener('click', (e) => {
         ['p1', 'p2'].forEach(pl => {
