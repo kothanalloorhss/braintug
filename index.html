@@ -327,11 +327,11 @@ body{font-family:'Inter',sans-serif;color:var(--text);touch-action:none;-webkit-
   padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;
   transition:all .2s;cursor:default;
 }
-.bracket-match.active{border-color:var(--p2);box-shadow:0 0 20px var(--p2-glow);transform:scale(1.02);}
-.bracket-match.done{border-left:3px solid var(--green);opacity:.7;}
+.bracket-match.active{border-color:var(--p2);box-shadow:0 0 20px var(--p2-glow);}
+.bracket-match.done{border-left:3px solid var(--green);opacity:.65;}
 .bracket-match.playable{cursor:pointer;}
 .bracket-match.playable:hover{border-color:rgba(255,255,255,0.2);}
-.bracket-player{font-family:'Rajdhani',sans-serif;font-size:1rem;font-weight:600;}
+.bracket-player{font-family:'Rajdhani',sans-serif;font-size:.95rem;font-weight:600;}
 .bracket-winner-text{color:var(--green);}
 
 /* ── TOURNAMENT ROSTER TOGGLE ── */
@@ -396,19 +396,6 @@ body{font-family:'Inter',sans-serif;color:var(--text);touch-action:none;-webkit-
 }
 .mo-arrow:hover{background:rgba(255,255,255,0.1);color:var(--text);}
 .mo-arrow:disabled{opacity:.2;cursor:default;}
-
-/* ── LIVE BRACKET ── */
-.bracket-match{
-  background:var(--surface);border:1px solid var(--border);border-radius:10px;
-  padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;
-  transition:all .2s;
-}
-.bracket-match.active{border-color:var(--p2);box-shadow:0 0 20px var(--p2-glow);}
-.bracket-match.done{border-left:3px solid var(--green);opacity:.65;}
-.bracket-match.playable{cursor:pointer;}
-.bracket-match.playable:hover{border-color:rgba(255,255,255,0.2);}
-.bracket-player{font-family:'Rajdhani',sans-serif;font-size:.95rem;font-weight:600;}
-.bracket-winner-text{color:var(--green);}
 
 /* Scrollbar */
 ::-webkit-scrollbar{width:4px;height:4px;}
@@ -686,7 +673,6 @@ body{font-family:'Inter',sans-serif;color:var(--text);touch-action:none;-webkit-
 
   <!-- P1 Zone (top half on mobile, left on desktop) -->
   <div id="zone-p1" class="player-zone zone-p1-bg" style="position:absolute;top:0;left:0;right:0;bottom:50%;">
-    <!-- Rotated for player on opposite side on mobile -->
     <div class="player-hud">
       <div class="player-avatar avatar-p1" id="p1-avatar-txt">P1</div>
       <div>
@@ -764,21 +750,20 @@ body{font-family:'Inter',sans-serif;color:var(--text);touch-action:none;-webkit-
 
 <!-- ─────────────────────────────────────────────
      SCREEN 5A: TOURNAMENT SCOPE  (Step 1 of 3)
-     Ask: within one class or across multiple classes?
+     UPDATED: Class + Division aware
      ───────────────────────────────────────────── -->
 <div id="screen-tourney-scope" class="screen hidden">
   <div class="flex flex-col items-center justify-center h-full px-6 gap-8">
-
     <div class="text-center fade-in-up">
       <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[var(--p2)]/30 bg-[var(--p2)]/5 text-[10px] text-[var(--p2)] f-display tracking-widest uppercase mb-4">
         <i class="fas fa-trophy text-[8px]"></i> Competition Mode
       </div>
       <h2 class="f-display text-4xl font-bold text-white">Who is competing?</h2>
-      <p class="text-[var(--muted)] text-sm mt-2">Choose the scope of this competition</p>
+      <p class="text-[var(--muted)] text-sm mt-2">Choose the scope: one class‑division or multiple</p>
     </div>
 
     <div class="flex flex-col gap-4 w-full max-w-xs fade-in-up" style="animation-delay:.06s">
-      <!-- Within one class -->
+      <!-- Within one class‑division -->
       <button onclick="selectTourneyScope('single')"
         class="group relative p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-left transition-all hover:border-[var(--p1)] hover:shadow-[0_0_24px_var(--p1-glow)] active:scale-95">
         <div class="flex items-center gap-4">
@@ -786,13 +771,13 @@ body{font-family:'Inter',sans-serif;color:var(--text);touch-action:none;-webkit-
             <i class="fas fa-users text-[#818CF8] text-lg"></i>
           </div>
           <div>
-            <div class="f-display font-bold text-white text-xl">Within a Class</div>
-            <div class="text-[var(--muted)] text-xs mt-0.5">All students from one class · most common</div>
+            <div class="f-display font-bold text-white text-xl">Within a Class & Division</div>
+            <div class="text-[var(--muted)] text-xs mt-0.5">e.g. 5A, 6B – single class‑division</div>
           </div>
         </div>
       </button>
 
-      <!-- Across multiple classes -->
+      <!-- Across multiple class‑divisions -->
       <button onclick="selectTourneyScope('multi')"
         class="group relative p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-left transition-all hover:border-[var(--p2)] hover:shadow-[0_0_24px_var(--p2-glow)] active:scale-95">
         <div class="flex items-center gap-4">
@@ -800,8 +785,8 @@ body{font-family:'Inter',sans-serif;color:var(--text);touch-action:none;-webkit-
             <i class="fas fa-layer-group text-[#FCD34D] text-lg"></i>
           </div>
           <div>
-            <div class="f-display font-bold text-white text-xl">Across Classes</div>
-            <div class="text-[var(--muted)] text-xs mt-0.5">Select students from 2 or more classes</div>
+            <div class="f-display font-bold text-white text-xl">Across Classes & Divisions</div>
+            <div class="text-[var(--muted)] text-xs mt-0.5">Select 2 or more class‑divisions</div>
           </div>
         </div>
       </button>
@@ -813,40 +798,35 @@ body{font-family:'Inter',sans-serif;color:var(--text);touch-action:none;-webkit-
 
 <!-- ─────────────────────────────────────────────
      SCREEN 5B: TOURNAMENT ROSTER  (Step 2 of 3)
-     Pick class(es) → uncheck absentees → confirm
+     UPDATED: Shows class‑division chips
      ───────────────────────────────────────────── -->
 <div id="screen-tourney-setup" class="screen hidden" style="display:none">
   <div class="flex flex-col h-full p-3 gap-3 max-w-lg mx-auto w-full">
-
-    <!-- Header -->
     <div class="flex items-center justify-between flex-shrink-0">
       <div>
         <h2 class="f-display text-2xl font-bold text-[#FCD34D]">Build Roster</h2>
-        <p id="tourney-scope-label" class="text-[var(--muted)] text-xs mt-0.5">Select a class to load students</p>
+        <p id="tourney-scope-label" class="text-[var(--muted)] text-xs mt-0.5">Select a class‑division to load students</p>
       </div>
       <button onclick="showScreen('screen-tourney-scope')" class="btn-secondary text-xs py-1.5 px-3">← Back</button>
     </div>
 
-    <!-- Class selector chips — rendered by JS -->
+    <!-- Class‑division selector chips — rendered by JS -->
     <div id="tourney-class-chips" class="flex flex-wrap gap-2 flex-shrink-0"></div>
 
-    <!-- Divider -->
     <div class="flex items-center gap-2 text-[10px] text-[var(--muted)] uppercase tracking-widest flex-shrink-0">
       <div class="flex-1 h-px bg-[var(--border)]"></div>
       <span>Mark absentees</span>
       <div class="flex-1 h-px bg-[var(--border)]"></div>
     </div>
 
-    <!-- Roster list — all checked by default; uncheck = absent -->
     <div class="flex-1 overflow-y-auto min-h-0">
       <ul id="tourney-roster" class="space-y-1.5">
         <li class="text-center text-[var(--muted)] text-sm py-8 opacity-50">
-          <i class="fas fa-hand-pointer mr-2"></i>Select a class above to load students
+          <i class="fas fa-hand-pointer mr-2"></i>Select a class‑division above to load students
         </li>
       </ul>
     </div>
 
-    <!-- Footer actions -->
     <div class="flex-shrink-0 flex flex-col gap-2">
       <div class="flex items-center justify-between text-xs text-[var(--muted)] px-1">
         <span id="roster-present-count">0 present</span>
@@ -864,7 +844,6 @@ body{font-family:'Inter',sans-serif;color:var(--text);touch-action:none;-webkit-
 
 <!-- ─────────────────────────────────────────────
      SCREEN 5C: MATCH ORDER  (Step 3 of 3)
-     Drag or click to reorder the match queue
      ───────────────────────────────────────────── -->
 <div id="screen-tourney-order" class="screen hidden" style="display:none">
   <div class="flex flex-col h-full p-3 gap-3 max-w-lg mx-auto w-full">
@@ -872,7 +851,7 @@ body{font-family:'Inter',sans-serif;color:var(--text);touch-action:none;-webkit-
     <div class="flex items-center justify-between flex-shrink-0">
       <div>
         <h2 class="f-display text-2xl font-bold text-white">Match Order</h2>
-        <p class="text-[var(--muted)] text-xs mt-0.5">System-suggested pairing · drag or tap ↑↓ to reorder</p>
+        <p class="text-[var(--muted)] text-xs mt-0.5">System-suggested pairing · tap ↑↓ to reorder</p>
       </div>
       <button onclick="showScreen('screen-tourney-setup')" class="btn-secondary text-xs py-1.5 px-3">← Back</button>
     </div>
