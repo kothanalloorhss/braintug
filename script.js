@@ -9,7 +9,7 @@
 /* ─────────────────────────────────────────────────────────────
    §1  CONSTANTS & CONFIG
    ───────────────────────────────────────────────────────────── */
-
+const ADMIN_PASSWORD   = 'admin'
 const SETUP_DATE_KEY   = 'bt_setup_date';
 const PROFILES_KEY     = 'bt_profiles';      // NEW schema: keyed by student_id
 const HISTORY_KEY      = 'bt_history';
