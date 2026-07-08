@@ -417,7 +417,6 @@
     function renderKbdPreCheckUI() {
         const p1El  = get('kpc-p1-status');
         const p2El  = get('kpc-p2-status');
-        const btnEl = get('kpc-skip-btn');
         if (p1El) p1El.textContent  = STATE.kbdCheck.p1Ready ? '✓ READY' : 'Press A';
         if (p1El) p1El.className    = STATE.kbdCheck.p1Ready
             ? 'f-display text-2xl font-bold text-[var(--green)]'
@@ -1023,12 +1022,10 @@
     /* ─────────────────────────────────────────────────────────────
        §14b  TOURNAMENT — STEP 2: ROSTER BUILDER
        ───────────────────────────────────────────────────────────── */
-    /** Render class‑division chips based on unique combinations in students.json */
     function renderClassChips() {
         const container = get('tourney-class-chips');
         if (!container) return;
 
-        // Unique class‑division combos
         const combos = [...new Set(STATE.students.map(s => classDivKey(s.class, s.division)))];
         combos.sort((a, b) => {
             const aNum = parseInt(a), bNum = parseInt(b);
@@ -1066,7 +1063,7 @@
 
     function buildRosterFromSelection() {
         const prev = STATE.tourney.roster;
-        const selected = STATE.tourney.selectedClasses; // array of "5A", etc.
+        const selected = STATE.tourney.selectedClasses;
 
         STATE.tourney.roster = STATE.students
             .filter(s => selected.includes(classDivKey(s.class, s.division)))
@@ -1408,7 +1405,7 @@
         showScreen('screen-menu');
     }
 
-    // Legacy stubs
+    // Legacy stubs (kept for backwards compatibility)
     function generateBracket() { confirmRoster(); }
     function setActiveMatch() {}
     function addTourneyPlayer() {}
@@ -2122,7 +2119,7 @@
     });
 
     /* ─────────────────────────────────────────────────────────────
-       §27  GLOBAL EXPORTS
+       §27  GLOBAL EXPORTS  (ALL functions called from HTML)
        ───────────────────────────────────────────────────────────── */
     window.get                    = get;
     window.showScreen             = showScreen;
@@ -2157,24 +2154,41 @@
     window.verifyAdminPass        = verifyAdminPass;
     window.showTeacherLogin       = showTeacherLogin;
 
+    // Tournament scope & roster
+    window.selectTourneyScope     = selectTourneyScope;
+    window.toggleClassChip        = toggleClassChip;
+    window.confirmRoster          = confirmRoster;
+    window.checkAllRoster         = checkAllRoster;
+    window.toggleRosterPresent    = toggleRosterPresent;
+
+    // Match order & live hub
+    window.moveMatch              = moveMatch;
+    window.startTournamentFromOrder = startTournamentFromOrder;
+    window.jumpToMatch            = jumpToMatch;
+    window.adminDeclareWinner     = adminDeclareWinner;
+    window.handleTournamentWin    = handleTournamentWin;
+    window.saveAndExit            = saveAndExit;
+    window.finishTournament       = finishTournament;
+
+    // Legacy (still exported for safety)
     window.loadRosterIntoPlayers  = loadRosterIntoPlayers;
     window.addTourneyPlayer       = addTourneyPlayer;
     window.clearTPlayers          = clearTPlayers;
     window.removeTourneyPlayer    = removeTourneyPlayer;
     window.generateBracket        = generateBracket;
     window.setActiveMatch         = setActiveMatch;
-    window.saveAndExit            = saveAndExit;
-    window.finishTournament       = finishTournament;
-    window.handleTournamentWin    = handleTournamentWin;
 
+    // Teacher
     window.sortTeacherTable       = sortTeacherTable;
     window.hideTeacher            = hideTeacher;
     window.clearStats             = clearStats;
     window.exportProfiles         = exportProfiles;
 
+    // History
     window.showHistory            = showHistory;
     window.clearHistory           = clearHistory;
 
+    // Game
     window.tapInput               = tapInput;
     window.tapClear               = tapClear;
     window.prepareGame            = prepareGame;
